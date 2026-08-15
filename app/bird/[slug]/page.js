@@ -18,6 +18,7 @@ export default function BirdDetailPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [minConfidence, setMinConfidence] = useState(50);
+  const [imageExpanded, setImageExpanded] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -64,11 +65,17 @@ export default function BirdDetailPage({ params }) {
           <>
             <div className="mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4 flex gap-3.5 items-center">
               {bird.imageUrl ? (
-                <img
-                  src={bird.imageUrl}
-                  alt={bird.name}
-                  className="w-[72px] h-[72px] rounded-full object-cover flex-shrink-0 border-[3px] border-white shadow-[0_0_0_2px_#8FC2CB]"
-                />
+                <button
+                  onClick={() => setImageExpanded(true)}
+                  aria-label="写真を拡大表示"
+                  className="flex-shrink-0"
+                >
+                  <img
+                    src={bird.imageUrl}
+                    alt={bird.name}
+                    className="w-[72px] h-[72px] rounded-full object-cover border-[3px] border-white shadow-[0_0_0_2px_#8FC2CB]"
+                  />
+                </button>
               ) : (
                 <div
                   className="w-[72px] h-[72px] rounded-full flex items-center justify-center text-4xl flex-shrink-0 border-[3px] border-white shadow-[0_0_0_2px_#8FC2CB]"
@@ -82,6 +89,33 @@ export default function BirdDetailPage({ params }) {
                 <div className="font-display text-xl my-0.5">{bird.name}</div>
               </div>
             </div>
+
+            {imageExpanded && bird.imageUrl && (
+              <div
+                className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-6"
+                onClick={() => setImageExpanded(false)}
+              >
+                <div
+                  className="bg-white rounded-2xl p-3 max-w-sm w-full"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex justify-between items-center mb-2 px-1">
+                    <div className="text-xs font-bold text-ink">{bird.name}</div>
+                    <button
+                      onClick={() => setImageExpanded(false)}
+                      className="text-inkMuted text-lg leading-none"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <img
+                    src={bird.imageUrl}
+                    alt={bird.name}
+                    className="w-full aspect-square object-cover rounded-xl"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-2 mx-4 mb-3.5">
               <div className="bg-white border-[3px] border-cardBorder rounded-2xl text-center py-2">
