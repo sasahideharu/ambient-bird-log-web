@@ -25,6 +25,41 @@ const PLACEHOLDER_EMOJI = "🐦";
 //    ブラウザの本当のリロードが起きるとJSごと再読み込みされてリセットされる
 let sessionOrderMap = {};
 
+// 🔥 写真グリッドの1枚分。読み込みに失敗したら絵文字プレースホルダーに切り替える
+function SpeciesThumb({ species: s }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const showImage = s.imageUrl && !imgFailed;
+
+  return (
+    <Link
+      href={`/bird/${encodeURIComponent(s.name)}`}
+      className="rounded-2xl overflow-hidden border-[3px] border-cardBorder bg-white relative block hover:border-accent transition-colors"
+    >
+      {showImage ? (
+        <div className="aspect-square bg-page">
+          <img
+            src={s.imageUrl}
+            alt={s.name}
+            loading="lazy"
+            onError={() => setImgFailed(true)}
+            className="w-full h-full object-cover"
+          />
+        </div>
+      ) : (
+        <div
+          className="aspect-square flex items-center justify-center text-3xl"
+          style={{ backgroundColor: PLACEHOLDER_COLOR }}
+        >
+          {PLACEHOLDER_EMOJI}
+        </div>
+      )}
+      <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] font-bold text-center py-1.5">
+        {s.name}
+      </div>
+    </Link>
+  );
+}
+
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState("species");
   const [minConfidence, setMinConfidence] = useState(60);
@@ -192,31 +227,7 @@ export default function HomePage() {
             {/* 写真グリッド */}
             <div className="grid grid-cols-3 gap-2 px-4 pt-4 pb-5">
               {visible.map((s) => (
-                <Link
-                  href={`/bird/${encodeURIComponent(s.name)}`}
-                  key={s.name}
-                  className="rounded-2xl overflow-hidden border-[3px] border-cardBorder bg-white relative block hover:border-accent transition-colors"
-                >
-                  {s.imageUrl ? (
-                    <div className="aspect-square">
-                      <img
-                        src={s.imageUrl}
-                        alt={s.name}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      className="aspect-square flex items-center justify-center text-3xl"
-                      style={{ backgroundColor: PLACEHOLDER_COLOR }}
-                    >
-                      {PLACEHOLDER_EMOJI}
-                    </div>
-                  )}
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] font-bold text-center py-1.5">
-                    {s.name}
-                  </div>
-                </Link>
+                <SpeciesThumb key={s.name} species={s} />
               ))}
               {visible.length === 0 && (
                 <div className="col-span-3 text-center text-xs text-inkMuted py-6">
