@@ -3,11 +3,27 @@
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
-import { buildSpeciesList, buildLocationList } from "../lib/aggregate";
+import { buildSpeciesList, buildLocationList, buildDateList } from "../lib/aggregate";
+import dynamic from "next/dynamic";
+
+// 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む
+const LocationMap = dynamic(() => import("../components/LocationMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="mx-4 mb-4 rounded-2xl border-[3px] border-cardBorder bg-white h-40 flex items-center justify-center text-xs text-inkMuted">
+      地図を読み込み中...
+    </div>
+  ),
+});
 
 // 🔥 写真がまだ登録されていない鳥のプレースホルダー色（絵文字はひとまず共通）
-const PLACEHOLDER_COLOR = "#C7D3C9";
+const PLACEHOLDER_COLOR = "#F6E1E4";
 const PLACEHOLDER_EMOJI = "🐦";
+
+// 🔥 種の並び順を、このページを開いている間（＝ページ内遷移をしている間）だけ覚えておく。
+//    モジュールスコープの変数なので、Next.js内のページ遷移（Linkでの移動）では保持されるが、
+//    ブラウザの本当のリロードが起きるとJSごと再読み込みされてリセットされる
+let sessionOrderMap = {};
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState("species");
@@ -18,6 +34,7 @@ export default function HomePage() {
   const [birdImages, setBirdImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [orderMap, setOrderMap] = useState(() => ({ ...sessionOrderMap }));
 
   useEffect(() => {
     async function load() {
@@ -40,6 +57,25 @@ export default function HomePage() {
     load();
   }, []);
 
+  // 🔥 データが読み込まれたら、まだ順番が決まっていない鳥にだけ新しくランダムな順位を割り当てて保存する
+  //    （信頼度フィルタの影響を受けない、全種を対象にすることで、フィルタを動かしても既存の順番が崩れないようにする）
+  useEffect(() => {
+    if (rawDetections.length === 0) return;
+    const allSpecies = buildSpeciesList(rawDetections, birdImages);
+    setOrderMap((prev) => {
+      const next = { ...sessionOrderMap, ...prev };
+      let changed = false;
+      for (const s of allSpecies) {
+        if (!(s.name in next)) {
+          next[s.name] = Math.random();
+          changed = true;
+        }
+      }
+      if (changed) sessionOrderMap = next;
+      return changed ? next : prev;
+    });
+  }, [rawDetections, birdImages]);
+
   // 🔥 「信頼度○%以上の記録が1件でもあれば、その鳥を種目録に出す」という判定にするため、
   //    先に記録を信頼度で絞り込んでから、鳥ごとに集計する
   const visible = useMemo(() => {
@@ -47,27 +83,34 @@ export default function HomePage() {
       (d) => Math.round(d.confidence * 100) >= minConfidence
     );
     const speciesList = buildSpeciesList(filteredDetections, birdImages);
-    return speciesList.filter(
+    const keywordFiltered = speciesList.filter(
       (s) => keyword.trim() === "" || s.name.includes(keyword.trim())
     );
-  }, [rawDetections, birdImages, minConfidence, keyword]);
+
+    // 🔥 ヒヨドリ・ガビチョウ以外は保存済みの順番で並べ、この2種は必ず最後（ヒヨドリ→ガビチョウ）に固定する
+    const FIXED_TAIL_ORDER = ["ヒヨドリ", "ガビチョウ"];
+    const rest = keywordFiltered
+      .filter((s) => !FIXED_TAIL_ORDER.includes(s.name))
+      .slice()
+      .sort((a, b) => (orderMap[a.name] ?? 0.5) - (orderMap[b.name] ?? 0.5));
+    const fixedTail = FIXED_TAIL_ORDER.map((name) =>
+      keywordFiltered.find((s) => s.name === name)
+    ).filter(Boolean);
+
+    return [...rest, ...fixedTail];
+  }, [rawDetections, birdImages, minConfidence, keyword, orderMap]);
 
   const locations = useMemo(() => buildLocationList(rawDetections), [rawDetections]);
+  const dates = useMemo(() => buildDateList(rawDetections), [rawDetections]);
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-page p-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         {/* ヘッダーバナー */}
         <div className="bg-header px-6 pt-6 pb-6 rounded-b-3xl">
-          <div className="text-[10px] tracking-[2px] text-headerText font-bold opacity-85">
-            FIELD OBSERVATION RECORD
-          </div>
-          <h1 className="font-display text-white text-2xl mt-1.5">
+          <h1 className="font-display text-[#5C5750] text-2xl">
             🎧 Ambient Bird Log 🐦
           </h1>
-          <p className="text-headerText text-xs font-bold mt-1">
-            身近な野鳥の観察記録
-          </p>
         </div>
 
         {/* タブ */}
@@ -80,17 +123,27 @@ export default function HomePage() {
                 : "text-inkMuted border-transparent"
             }`}
           >
-            🐦 種目録
+            🐦 鳥から探す
           </button>
           <button
             onClick={() => setActiveTab("location")}
-            className={`pb-2 text-sm font-bold border-b-[3px] transition-colors ${
+            className={`pb-2 mr-6 text-sm font-bold border-b-[3px] transition-colors ${
               activeTab === "location"
                 ? "text-ink border-accentText"
                 : "text-inkMuted border-transparent"
             }`}
           >
             📍 観測地点
+          </button>
+          <button
+            onClick={() => setActiveTab("date")}
+            className={`pb-2 text-sm font-bold border-b-[3px] transition-colors ${
+              activeTab === "date"
+                ? "text-ink border-accentText"
+                : "text-inkMuted border-transparent"
+            }`}
+          >
+            📅 観測日
           </button>
         </div>
 
@@ -120,7 +173,7 @@ export default function HomePage() {
                 onChange={(e) => setMinConfidence(Number(e.target.value))}
                 className="abl-slider w-full mt-2 h-1 rounded-full appearance-none cursor-pointer"
                 style={{
-                  background: `linear-gradient(to right, #B4CF9E ${minConfidence}%, #E5E0D2 ${minConfidence}%)`,
+                  background: `linear-gradient(to right, #8FC2CB ${minConfidence}%, #E9E6E1 ${minConfidence}%)`,
                 }}
               />
             </div>
@@ -132,7 +185,7 @@ export default function HomePage() {
                 placeholder="和名で検索"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-2xl border-[3px] border-cardBorder bg-white text-sm text-ink placeholder:text-[#B7B7A8] outline-none focus:border-accent"
+                className="w-full px-4 py-2.5 rounded-2xl border-[3px] border-cardBorder bg-white text-sm text-ink placeholder:text-[#9C978F] outline-none focus:border-accent"
               />
             </div>
 
@@ -174,19 +227,24 @@ export default function HomePage() {
             </>
             )}
           </>
-        ) : (
-          <div className="px-4 pt-4 pb-5">
+        ) : activeTab === "location" ? (
+          <div className="pt-4 pb-5">
+            {!loading && !loadError && locations.length > 0 && (
+              <LocationMap locations={locations} />
+            )}
+            <div className="px-4">
             {loading && (
               <p className="text-center text-xs text-inkMuted py-6">読み込み中...</p>
             )}
             {!loading &&
               locations.map((loc) => (
-                <div
+                <Link
+                  href={`/loc/${encodeURIComponent(loc.name)}`}
                   key={loc.name}
-                  className="w-full flex items-center gap-3 bg-white border-[3px] border-cardBorder rounded-2xl p-3 mb-3"
+                  className="w-full flex items-center gap-3 bg-white border-[3px] border-cardBorder rounded-2xl p-3 mb-3 hover:border-accent transition-colors"
                 >
                   <div
-                    className="w-11 h-11 rounded-full flex items-center justify-center text-xl flex-shrink-0 border-[3px] border-white shadow-[0_0_0_2px_#B4CF9E]"
+                    className="w-11 h-11 rounded-full flex items-center justify-center text-xl flex-shrink-0 border-[3px] border-white shadow-[0_0_0_2px_#8FC2CB]"
                     style={{ backgroundColor: PLACEHOLDER_COLOR }}
                   >
                     📍
@@ -198,8 +256,38 @@ export default function HomePage() {
                       {loc.lastSeen}
                     </div>
                   </div>
-                </div>
+                  <div className="text-accentText text-base">›</div>
+                </Link>
               ))}
+            </div>
+          </div>
+        ) : (
+          <div className="px-4 pt-4 pb-5">
+            {loading && (
+              <p className="text-center text-xs text-inkMuted py-6">読み込み中...</p>
+            )}
+            {!loading &&
+              dates.map((d) => (
+                <Link
+                  href={`/date/${d.isoDate}`}
+                  key={d.isoDate}
+                  className="w-full flex items-center gap-3 bg-white border-[3px] border-cardBorder rounded-2xl p-3 mb-3 hover:border-accent transition-colors"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-[#E6DEEC] border-[3px] border-white shadow-[0_0_0_2px_#C7B8D2] flex flex-col items-center justify-center flex-shrink-0">
+                    <div className="font-display text-sm">{d.date}</div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-display text-base">{d.date}</div>
+                    <div className="text-[11px] text-inkMuted font-bold mt-0.5">
+                      検出種数 {d.speciesCount}・記録数 {d.recordCount}件・{d.locations}
+                    </div>
+                  </div>
+                  <div className="text-accentText text-base">›</div>
+                </Link>
+              ))}
+            {!loading && dates.length === 0 && (
+              <p className="text-center text-xs text-inkMuted py-6">観測記録がありません</p>
+            )}
           </div>
         )}
       </div>

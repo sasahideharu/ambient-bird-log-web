@@ -3,18 +3,14 @@
 import { useState, useEffect, useMemo, use } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { fetchSpeciesDetail } from "../../../lib/speciesDetail";
+import { fetchDateDetail } from "../../../lib/dateDetail";
 import { getAudioUrl } from "../../../lib/queries";
 import AudioSpectrogramCard from "../../../components/AudioSpectrogramCard";
 
-const PLACEHOLDER_COLOR = "#F6E1E4";
-const PLACEHOLDER_EMOJI = "🐦";
+export default function DateDetailPage({ params }) {
+  const { value } = use(params);
 
-export default function BirdDetailPage({ params }) {
-  const { slug } = use(params);
-  const commonName = decodeURIComponent(slug);
-
-  const [bird, setBird] = useState(null);
+  const [day, setDay] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [minConfidence, setMinConfidence] = useState(50);
@@ -22,12 +18,12 @@ export default function BirdDetailPage({ params }) {
   useEffect(() => {
     async function load() {
       try {
-        const result = await fetchSpeciesDetail(commonName);
+        const result = await fetchDateDetail(value);
         if (!result) {
           notFound();
           return;
         }
-        setBird(result);
+        setDay(result);
       } catch (err) {
         console.error(err);
         setLoadError("データの取得に失敗しました。");
@@ -36,65 +32,34 @@ export default function BirdDetailPage({ params }) {
       }
     }
     load();
-  }, [commonName]);
+  }, [value]);
 
   const visibleRecords = useMemo(() => {
-    if (!bird) return [];
-    return bird.records.filter((r) => r.confidence >= minConfidence);
-  }, [bird, minConfidence]);
-
-  const avgConfidence = useMemo(() => {
-    if (!bird || bird.records.length === 0) return 0;
-    return Math.round(
-      bird.records.reduce((sum, r) => sum + r.confidence, 0) / bird.records.length
-    );
-  }, [bird]);
+    if (!day) return [];
+    return day.records.filter((r) => r.confidence >= minConfidence);
+  }, [day, minConfidence]);
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-page p-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         <Link href="/" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
-          ‹ 鳥から探すに戻る
+          ‹ 観測日に戻る
         </Link>
 
         {loading && <p className="text-center text-xs text-inkMuted py-10">読み込み中...</p>}
         {loadError && <p className="text-center text-xs text-red-500 py-10 px-6">{loadError}</p>}
 
-        {!loading && !loadError && bird && (
+        {!loading && !loadError && day && (
           <>
             <div className="mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4 flex gap-3.5 items-center">
-              {bird.imageUrl ? (
-                <img
-                  src={bird.imageUrl}
-                  alt={bird.name}
-                  className="w-[72px] h-[72px] rounded-full object-cover flex-shrink-0 border-[3px] border-white shadow-[0_0_0_2px_#8FC2CB]"
-                />
-              ) : (
-                <div
-                  className="w-[72px] h-[72px] rounded-full flex items-center justify-center text-4xl flex-shrink-0 border-[3px] border-white shadow-[0_0_0_2px_#8FC2CB]"
-                  style={{ backgroundColor: PLACEHOLDER_COLOR }}
-                >
-                  {PLACEHOLDER_EMOJI}
-                </div>
-              )}
+              <div className="w-[60px] h-[60px] rounded-xl bg-[#E6DEEC] border-[3px] border-white shadow-[0_0_0_2px_#C7B8D2] flex items-center justify-center flex-shrink-0">
+                <div className="font-display text-lg">{day.date}</div>
+              </div>
               <div>
-                <div className="italic text-[11px] text-inkMuted">{bird.scientificName}</div>
-                <div className="font-display text-xl my-0.5">{bird.name}</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 mx-4 mb-3.5">
-              <div className="bg-white border-[3px] border-cardBorder rounded-2xl text-center py-2">
-                <div className="font-display text-base text-accentText">{bird.records.length}</div>
-                <div className="text-[9px] text-inkMuted font-bold">検出回数</div>
-              </div>
-              <div className="bg-white border-[3px] border-cardBorder rounded-2xl text-center py-2">
-                <div className="font-display text-base text-accentText">{avgConfidence}%</div>
-                <div className="text-[9px] text-inkMuted font-bold">平均信頼度</div>
-              </div>
-              <div className="bg-white border-[3px] border-cardBorder rounded-2xl text-center py-2">
-                <div className="font-display text-base text-accentText">{bird.locationCount}</div>
-                <div className="text-[9px] text-inkMuted font-bold">観測地点</div>
+                <div className="font-display text-xl">{day.date} の記録</div>
+                <div className="text-[11px] text-inkMuted font-bold">
+                  検出種数 {day.speciesCount}・観測地点 {day.locationCount}
+                </div>
               </div>
             </div>
 
@@ -122,15 +87,12 @@ export default function BirdDetailPage({ params }) {
                   <div key={r.id} className="bg-white border-[3px] border-cardBorder rounded-2xl p-3.5">
                     <div className="flex justify-between items-baseline mb-2">
                       <div className="text-[10px] tracking-wide text-accentText font-black">
-                        標本記録 No. {r.id}
+                        {r.species}
                       </div>
                       <div className="text-[11px] text-[#3F6C74] font-bold">識別信頼度 {r.confidence}%</div>
                     </div>
                     <AudioSpectrogramCard src={audioUrl} startSec={r.startSec} endSec={r.endSec} />
                     <div className="flex gap-1.5 mt-2">
-                      <span className="text-[10px] font-bold bg-page border-2 border-cardBorder rounded-lg px-2 py-1">
-                        📅 {r.date}
-                      </span>
                       <span className="text-[10px] font-bold bg-page border-2 border-cardBorder rounded-lg px-2 py-1">
                         📍 {r.location}
                       </span>
