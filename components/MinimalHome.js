@@ -1,21 +1,21 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useMemo } from "react";
-import Link from "next/link";
 import Image from "next/image";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
 import { buildSpeciesList } from "../lib/aggregate";
+import MinimalBirdModal from "./MinimalBirdModal";
 
 const CONFIDENCE_DEFAULT = 60;
 
 // 🔥 写真グリッドの1枚分。読み込みに失敗したら、写真なしの縁取りだけのマスに切り替える（admin版と同じ考え方）
-function MinimalThumb({ species: s }) {
+function MinimalThumb({ species: s, onSelect }) {
   const [imgFailed, setImgFailed] = useState(false);
   const showImage = s.imageUrl && !imgFailed;
 
   return (
-    <Link
-      href={`/bird/${encodeURIComponent(s.name)}`}
+    <button
+      onClick={() => onSelect(s.name)}
       className="rounded-xl overflow-hidden border border-white/50 hover:border-white relative block transition-colors bg-white/5"
     >
       <div className="aspect-square">
@@ -32,7 +32,7 @@ function MinimalThumb({ species: s }) {
       <div className="absolute bottom-0 left-0 right-0 bg-black/50 backdrop-blur-[1px] text-white text-[10px] font-medium tracking-wide text-center py-1.5">
         {s.name}
       </div>
-    </Link>
+    </button>
   );
 }
 
@@ -44,6 +44,7 @@ export default function MinimalHome() {
   const [bgRevealed, setBgRevealed] = useState(false);
   const [contentRevealed, setContentRevealed] = useState(false);
   const [bgHeight, setBgHeight] = useState(null);
+  const [selectedSpecies, setSelectedSpecies] = useState(null);
 
   // 🔥 InstagramやLINEのアプリ内ブラウザは、スクロール中にアドレスバーが伸び縮みして
   //    100vh/100lvhの値がその都度変わってしまい、背景がズームして見えてしまう。
@@ -149,7 +150,7 @@ export default function MinimalHome() {
           style={{ transitionDelay: "1800ms" }}
         >
           {visible.map((s) => (
-            <MinimalThumb key={s.name} species={s} />
+            <MinimalThumb key={s.name} species={s} onSelect={setSelectedSpecies} />
           ))}
           {visible.length === 0 && (
             <p className="col-span-3 text-center text-white/50 text-xs py-4">
@@ -158,6 +159,11 @@ export default function MinimalHome() {
           )}
         </div>
       </div>
+
+      <MinimalBirdModal
+        speciesName={selectedSpecies}
+        onClose={() => setSelectedSpecies(null)}
+      />
     </div>
   );
 }
