@@ -90,15 +90,18 @@ export default function MinimalHome() {
   }, [rawDetections, birdImages, keyword]);
 
   return (
-    <div className="relative min-h-screen w-full">
-      {/* 背景：画面サイズに固定し、スクロールしても動かない。暗めからスーッと本来の色に */}
+    <div className="relative w-full bg-black">
+      {/* 背景：sticky + 負のマージンで「固定に見える」ようにする。
+          position: fixed だとAndroidのChromeでアドレスバーの伸縮時に位置がズレることがあるため、
+          スクロールの動きに素直に追従するstickyの方が両OSで安定する */}
       <div
-        className={`fixed inset-0 w-screen ${
+        className={`sticky top-0 w-full -z-10 ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
         style={{
           transition: "opacity 2600ms ease-out, filter 2600ms ease-out",
           height: bgHeight ? `${bgHeight}px` : "100vh",
+          marginBottom: bgHeight ? `-${bgHeight}px` : "-100vh",
         }}
       >
         <Image
