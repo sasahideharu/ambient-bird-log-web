@@ -167,7 +167,7 @@ export default function MinimalHome() {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             placeholder="What bird sings now?"
-            className="w-full bg-white/10 border border-white/40 rounded-full px-5 py-3 text-white text-sm text-center placeholder:text-white/50 outline-none focus:border-white/80 transition-colors"
+            className="w-full bg-white/10 rounded-full px-5 py-3 text-white text-sm text-center placeholder:text-white/50 outline-none focus:bg-white/15 transition-colors"
           />
         </div>
 
