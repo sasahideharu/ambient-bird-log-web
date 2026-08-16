@@ -80,10 +80,10 @@ export default function MinimalHome() {
   }, [rawDetections, birdImages, keyword]);
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-black">
-      {/* 背景：暗めからスーッと本来の色に */}
+    <div className="relative min-h-screen w-full">
+      {/* 背景：画面サイズに固定し、スクロールしても動かない。暗めからスーッと本来の色に */}
       <div
-        className={`absolute inset-0 transition-all ease-out ${
+        className={`fixed inset-0 h-screen w-screen transition-all ease-out ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
         style={{ transitionDuration: "2600ms" }}
