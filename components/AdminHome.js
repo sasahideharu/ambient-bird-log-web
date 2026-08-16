@@ -4,6 +4,11 @@ import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
 import { buildSpeciesList, buildLocationList, buildDateList } from "../lib/aggregate";
+import {
+  getSessionOrderMap,
+  setSessionOrderMap,
+  sortWithFixedTail,
+} from "../lib/speciesOrder";
 import dynamic from "next/dynamic";
 
 // 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む
@@ -19,11 +24,6 @@ const LocationMap = dynamic(() => import("./LocationMap"), {
 // 🔥 写真がまだ登録されていない鳥のプレースホルダー色（絵文字はひとまず共通）
 const PLACEHOLDER_COLOR = "#F6E1E4";
 const PLACEHOLDER_EMOJI = "🐦";
-
-// 🔥 種の並び順を、このページを開いている間（＝ページ内遷移をしている間）だけ覚えておく。
-//    モジュールスコープの変数なので、Next.js内のページ遷移（Linkでの移動）では保持されるが、
-//    ブラウザの本当のリロードが起きるとJSごと再読み込みされてリセットされる
-let sessionOrderMap = {};
 
 // 🔥 写真グリッドの1枚分。読み込みに失敗したら絵文字プレースホルダーに切り替える
 function SpeciesThumb({ species: s }) {
@@ -69,7 +69,7 @@ export default function AdminHome() {
   const [birdImages, setBirdImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [orderMap, setOrderMap] = useState(() => ({ ...sessionOrderMap }));
+  const [orderMap, setOrderMap] = useState(() => ({ ...getSessionOrderMap() }));
 
   useEffect(() => {
     async function load() {
@@ -98,7 +98,7 @@ export default function AdminHome() {
     if (rawDetections.length === 0) return;
     const allSpecies = buildSpeciesList(rawDetections, birdImages);
     setOrderMap((prev) => {
-      const next = { ...sessionOrderMap, ...prev };
+      const next = { ...getSessionOrderMap(), ...prev };
       let changed = false;
       for (const s of allSpecies) {
         if (!(s.name in next)) {
@@ -106,7 +106,7 @@ export default function AdminHome() {
           changed = true;
         }
       }
-      if (changed) sessionOrderMap = next;
+      if (changed) setSessionOrderMap(next);
       return changed ? next : prev;
     });
   }, [rawDetections, birdImages]);
@@ -122,17 +122,7 @@ export default function AdminHome() {
       (s) => keyword.trim() === "" || s.name.includes(keyword.trim())
     );
 
-    // 🔥 ヒヨドリ・ガビチョウ以外は保存済みの順番で並べ、この2種は必ず最後（ヒヨドリ→ガビチョウ）に固定する
-    const FIXED_TAIL_ORDER = ["ヒヨドリ", "ガビチョウ"];
-    const rest = keywordFiltered
-      .filter((s) => !FIXED_TAIL_ORDER.includes(s.name))
-      .slice()
-      .sort((a, b) => (orderMap[a.name] ?? 0.5) - (orderMap[b.name] ?? 0.5));
-    const fixedTail = FIXED_TAIL_ORDER.map((name) =>
-      keywordFiltered.find((s) => s.name === name)
-    ).filter(Boolean);
-
-    return [...rest, ...fixedTail];
+    return sortWithFixedTail(keywordFiltered, orderMap);
   }, [rawDetections, birdImages, minConfidence, keyword, orderMap]);
 
   const locations = useMemo(() => buildLocationList(rawDetections), [rawDetections]);

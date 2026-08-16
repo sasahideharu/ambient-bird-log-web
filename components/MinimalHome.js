@@ -4,6 +4,11 @@ import { useState, useEffect, useLayoutEffect, useMemo } from "react";
 import Image from "next/image";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
 import { buildSpeciesList } from "../lib/aggregate";
+import {
+  getSessionOrderMap,
+  setSessionOrderMap,
+  sortWithFixedTail,
+} from "../lib/speciesOrder";
 import MinimalBirdModal from "./MinimalBirdModal";
 
 const CONFIDENCE_DEFAULT = 60;
@@ -45,6 +50,7 @@ export default function MinimalHome() {
   const [contentRevealed, setContentRevealed] = useState(false);
   const [bgHeight, setBgHeight] = useState(null);
   const [selectedSpecies, setSelectedSpecies] = useState(null);
+  const [orderMap, setOrderMap] = useState(() => ({ ...getSessionOrderMap() }));
 
   // 🔥 InstagramやLINEのアプリ内ブラウザは、スクロール中にアドレスバーが伸び縮みして
   //    100vh/100lvhの値がその都度変わってしまい、背景がズームして見えてしまう。
@@ -71,6 +77,25 @@ export default function MinimalHome() {
     load();
   }, []);
 
+  // 🔥 データが読み込まれたら、まだ順番が決まっていない鳥にだけ新しくランダムな順位を割り当てて保存する
+  //    （AdminHomeと同じsessionOrderMapを参照するので、両画面で同じ並びになる）
+  useEffect(() => {
+    if (rawDetections.length === 0) return;
+    const allSpecies = buildSpeciesList(rawDetections, birdImages);
+    setOrderMap((prev) => {
+      const next = { ...getSessionOrderMap(), ...prev };
+      let changed = false;
+      for (const s of allSpecies) {
+        if (!(s.name in next)) {
+          next[s.name] = Math.random();
+          changed = true;
+        }
+      }
+      if (changed) setSessionOrderMap(next);
+      return changed ? next : prev;
+    });
+  }, [rawDetections, birdImages]);
+
   useEffect(() => {
     const t1 = setTimeout(() => setBgRevealed(true), 80);
     const t2 = setTimeout(() => setContentRevealed(true), 650);
@@ -85,10 +110,11 @@ export default function MinimalHome() {
       (d) => Math.round(d.confidence * 100) >= CONFIDENCE_DEFAULT
     );
     const speciesList = buildSpeciesList(filteredDetections, birdImages);
-    return speciesList
-      .filter((s) => keyword.trim() === "" || s.name.includes(keyword.trim()))
-      .sort((a, b) => a.name.localeCompare(b.name, "ja"));
-  }, [rawDetections, birdImages, keyword]);
+    const keywordFiltered = speciesList.filter(
+      (s) => keyword.trim() === "" || s.name.includes(keyword.trim())
+    );
+    return sortWithFixedTail(keywordFiltered, orderMap);
+  }, [rawDetections, birdImages, keyword, orderMap]);
 
   return (
     <div className="relative w-full bg-black">
