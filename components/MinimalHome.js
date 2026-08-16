@@ -160,7 +160,7 @@ export default function MinimalHome() {
 
         <div
           className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-10`}
-          style={{ transitionDelay: "1500ms" }}
+          style={{ transitionDelay: "2400ms", transitionDuration: "2000ms" }}
         >
           <input
             type="text"
@@ -173,7 +173,7 @@ export default function MinimalHome() {
 
         <div
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-6 grid grid-cols-3 gap-2`}
-          style={{ transitionDelay: "1800ms" }}
+          style={{ transitionDelay: "5200ms", transitionDuration: "2000ms" }}
         >
           {visible.map((s) => (
             <MinimalThumb key={s.name} species={s} onSelect={setSelectedSpecies} />
