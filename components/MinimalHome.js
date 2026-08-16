@@ -8,6 +8,34 @@ import { buildSpeciesList } from "../lib/aggregate";
 
 const CONFIDENCE_DEFAULT = 60;
 
+// 🔥 写真グリッドの1枚分。読み込みに失敗したら、写真なしの縁取りだけのマスに切り替える（admin版と同じ考え方）
+function MinimalThumb({ species: s }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const showImage = s.imageUrl && !imgFailed;
+
+  return (
+    <Link
+      href={`/bird/${encodeURIComponent(s.name)}`}
+      className="rounded-xl overflow-hidden border border-white/50 hover:border-white relative block transition-colors bg-white/5"
+    >
+      <div className="aspect-square">
+        {showImage ? (
+          <img
+            src={s.imageUrl}
+            alt={s.name}
+            loading="lazy"
+            onError={() => setImgFailed(true)}
+            className="w-full h-full object-cover"
+          />
+        ) : null}
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 bg-black/50 backdrop-blur-[1px] text-white text-[10px] font-medium tracking-wide text-center py-1.5">
+        {s.name}
+      </div>
+    </Link>
+  );
+}
+
 export default function MinimalHome() {
   const [rawDetections, setRawDetections] = useState([]);
   const [birdImages, setBirdImages] = useState([]);
@@ -87,7 +115,7 @@ export default function MinimalHome() {
         </p>
 
         <div
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-xs mt-10`}
+          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-10`}
           style={{ transitionDelay: "1500ms" }}
         >
           <input
@@ -100,20 +128,14 @@ export default function MinimalHome() {
         </div>
 
         <div
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-xs mt-6 flex flex-col gap-2`}
+          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-6 grid grid-cols-3 gap-2`}
           style={{ transitionDelay: "1800ms" }}
         >
           {visible.map((s) => (
-            <Link
-              key={s.name}
-              href={`/bird/${encodeURIComponent(s.name)}`}
-              className="w-full text-center border border-white/40 hover:border-white rounded-full px-4 py-2 text-white text-sm tracking-wide transition-colors"
-            >
-              {s.name}
-            </Link>
+            <MinimalThumb key={s.name} species={s} />
           ))}
           {visible.length === 0 && (
-            <p className="text-center text-white/50 text-xs py-4">
+            <p className="col-span-3 text-center text-white/50 text-xs py-4">
               該当する野鳥が見つかりませんでした
             </p>
           )}
