@@ -60,10 +60,10 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
       }`}
       onClick={onClose}
     >
-      <div className="absolute inset-0 bg-black/70" />
+      <div className="absolute inset-0 bg-black/45" />
 
       <div
-        className={`relative rounded-[28px] overflow-hidden bg-black/15 backdrop-blur-2xl border border-white/15 transition-all duration-500 ${
+        className={`relative rounded-[28px] overflow-hidden bg-black/5 backdrop-blur-2xl border border-white/20 transition-all duration-500 ${
           visible ? "opacity-100 scale-100" : "opacity-0 scale-95"
         }`}
         style={{ width: "90vw", height: "90vh" }}
