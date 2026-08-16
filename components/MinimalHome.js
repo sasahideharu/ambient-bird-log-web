@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
@@ -49,7 +49,7 @@ export default function MinimalHome() {
   //    100vh/100lvhの値がその都度変わってしまい、背景がズームして見えてしまう。
   //    なので、最初に一度だけ画面の高さを測って固定値（px）として使い、以後は測り直さない。
   //    後からアドレスバーが縮んで表示領域が広がっても隙間ができないよう、余裕を持たせておく。
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof window === "undefined") return;
     setBgHeight(window.innerHeight + 160);
   }, []);
@@ -93,11 +93,11 @@ export default function MinimalHome() {
     <div className="relative min-h-screen w-full">
       {/* 背景：画面サイズに固定し、スクロールしても動かない。暗めからスーッと本来の色に */}
       <div
-        className={`fixed inset-0 w-screen transition-all ease-out ${
+        className={`fixed inset-0 w-screen ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
         style={{
-          transitionDuration: "2600ms",
+          transition: "opacity 2600ms ease-out, filter 2600ms ease-out",
           height: bgHeight ? `${bgHeight}px` : "100vh",
         }}
       >
@@ -121,10 +121,11 @@ export default function MinimalHome() {
           Ambient Bird Log
         </h1>
         <p
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-[10px] tracking-[2px] text-center mt-2`}
+          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-center mt-2`}
           style={{ transitionDelay: "900ms" }}
         >
-          by Hideharu Sasa from Angle Matters
+          <span className="block text-[10px] tracking-[2px]">by Hideharu Sasa</span>
+          <span className="block text-[7px] tracking-[1.5px] mt-1 opacity-80">from Angle Matters</span>
         </p>
 
         <div
