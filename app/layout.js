@@ -3,6 +3,9 @@ import "./globals.css";
 export const metadata = {
   title: "Ambient Bird Log",
   description: "身近な野鳥の観察記録",
+};
+
+export const viewport = {
   colorScheme: "light",
 };
 

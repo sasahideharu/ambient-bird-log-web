@@ -95,7 +95,7 @@ export default function MinimalHome() {
           position: fixed だとAndroidのChromeでアドレスバーの伸縮時に位置がズレることがあるため、
           スクロールの動きに素直に追従するstickyの方が両OSで安定する */}
       <div
-        className={`sticky top-0 w-full -z-10 ${
+        className={`sticky top-0 w-full z-0 ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
         style={{
