@@ -3,6 +3,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { computeSpectrogram, drawSpectrogram } from "../lib/spectrogram";
 
+// 秒数を「0:03」のような表示に変換する
+function formatTime(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
 // 🔥 ミニマルトップページ用の、大きく強調したスペクトログラム。
 //    再生ボタンはスペクトログラムの上に半透明で重ね、再生中はボタンを消して
 //    再生位置を示すラインだけが動く
@@ -12,16 +20,19 @@ export default function MinimalSpectrogram({ src, startSec, endSec }) {
   const rafRef = useRef(null);
   const framesRef = useRef(null);
   const nyquistRef = useRef(null);
+  const timeLabelRef = useRef(null);
 
   const [status, setStatus] = useState("loading"); // loading | ready | error
   const [playing, setPlaying] = useState(false);
+
+  const durationSec = Math.max(0, (endSec ?? 0) - (startSec ?? 0));
 
   const redraw = useCallback((playheadT) => {
     if (!framesRef.current || !canvasRef.current) return;
     drawSpectrogram(canvasRef.current, framesRef.current, {
       nyquist: nyquistRef.current,
       playheadT,
-      showLabels: false,
+      showLabels: true,
     });
   }, []);
 
@@ -89,9 +100,16 @@ export default function MinimalSpectrogram({ src, startSec, endSec }) {
       audio.currentTime = startSec ?? 0;
       setPlaying(false);
       redraw(0);
+      if (timeLabelRef.current) {
+        timeLabelRef.current.textContent = `0:00 / ${formatTime(durationSec)}`;
+      }
       return;
     }
     redraw(currentPlayheadT());
+    if (timeLabelRef.current) {
+      const elapsed = audio.currentTime - (startSec ?? 0);
+      timeLabelRef.current.textContent = `${formatTime(elapsed)} / ${formatTime(durationSec)}`;
+    }
     rafRef.current = requestAnimationFrame(loop);
   }
 
@@ -132,6 +150,13 @@ export default function MinimalSpectrogram({ src, startSec, endSec }) {
         }}
       />
       <canvas ref={canvasRef} width={700} height={467} className="w-full h-full block" />
+
+      <span
+        ref={timeLabelRef}
+        className="absolute bottom-2 left-3 text-[10px] font-mono text-white/70 tabular-nums"
+      >
+        0:00 / {formatTime(durationSec)}
+      </span>
 
       {status === "ready" && !playing && (
         <button

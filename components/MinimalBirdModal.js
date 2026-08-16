@@ -7,6 +7,14 @@ import MinimalSpectrogram from "./MinimalSpectrogram";
 
 const CONFIDENCE_DEFAULT = 60;
 
+// "2026-08-01" のようなISO日付を "August 2026" のような表記に変換する
+function formatMonthYear(isoDate) {
+  if (!isoDate) return null;
+  const d = new Date(`${isoDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
 export default function MinimalBirdModal({ speciesName, onClose }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -55,7 +63,7 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
       <div className="absolute inset-0 bg-black/70" />
 
       <div
-        className={`relative rounded-[28px] overflow-hidden bg-black/40 backdrop-blur-2xl border border-white/15 transition-all duration-500 ${
+        className={`relative rounded-[28px] overflow-hidden bg-black/15 backdrop-blur-2xl border border-white/15 transition-all duration-500 ${
           visible ? "opacity-100 scale-100" : "opacity-0 scale-95"
         }`}
         style={{ width: "90vw", height: "90vh" }}
@@ -69,42 +77,54 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
           ×
         </button>
 
-        <div className="w-full h-full overflow-y-auto px-6 pt-14 pb-12 flex flex-col items-center">
-          {loading && <p className="text-white/50 text-xs py-16">…</p>}
+        {loading && (
+          <p className="text-white/50 text-xs text-center py-16">…</p>
+        )}
 
-          {!loading && detail && (
-            <>
-              {/* 表示内容1：学名（小）・和名（大） */}
+        {!loading && detail && (
+          <div className="w-full h-full flex flex-col">
+            {/* 固定ヘッダー：学名・和名・画像はスクロールしない */}
+            <div className="flex-shrink-0 px-6 pt-14 pb-4 flex flex-col items-center">
               <div className="italic text-white/70 text-xs text-center">
                 {detail.scientificName}
               </div>
               <div className="font-hero text-white text-3xl text-center mt-1">
                 {detail.name}
               </div>
-
-              {/* 表示内容2：野鳥の画像 */}
               {detail.imageUrl && (
                 <img
                   src={detail.imageUrl}
                   alt={detail.name}
-                  className="w-full rounded-2xl mt-6 object-cover"
+                  className="w-full rounded-2xl mt-4 object-cover"
+                  style={{ maxHeight: "26vh" }}
                 />
               )}
+            </div>
 
-              {/* 表示内容3：音声データ（スペクトログラム＋再生） */}
-              <div className="w-full flex flex-col gap-6 mt-8">
-                {records.map((r) => (
-                  <MinimalSpectrogram
-                    key={r.id}
-                    src={getAudioUrl(r.wavFilename)}
-                    startSec={r.startSec}
-                    endSec={r.endSec}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+            {/* スクロール領域：音声データだけがここで動く */}
+            <div className="flex-1 overflow-y-auto px-6 pb-10 flex flex-col gap-7">
+              {records.map((r) => {
+                const caption = [formatMonthYear(r.isoDate), r.location]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                  <div key={r.id}>
+                    {caption && (
+                      <div className="text-[10px] text-white/50 tracking-wide mb-1.5">
+                        {caption}
+                      </div>
+                    )}
+                    <MinimalSpectrogram
+                      src={getAudioUrl(r.wavFilename)}
+                      startSec={r.startSec}
+                      endSec={r.endSec}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
