@@ -186,8 +186,8 @@ export default function MinimalHome() {
         </div>
       </div>
 
-      {/* フッター：白い帯にInstagramアイコン */}
-      <div className="relative z-10 w-full bg-white py-6 flex items-center justify-center">
+      {/* フッター：白い帯にInstagramアイコンと著作権表記 */}
+      <div className="relative z-10 w-full bg-white py-6 flex flex-col items-center justify-center gap-3">
         <a
           href="https://www.instagram.com/hideharu.sasa?igsh=Y2Z6c2h5Nmd2Zm5u&utm_source=qr"
           target="_blank"
@@ -207,6 +207,9 @@ export default function MinimalHome() {
             <circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" />
           </svg>
         </a>
+        <p className="text-[10px] text-[#A0A0A0] tracking-wide">
+          © 2026 Hideharu Sasa. All rights reserved.
+        </p>
       </div>
 
       <MinimalBirdModal
