@@ -186,6 +186,29 @@ export default function MinimalHome() {
         </div>
       </div>
 
+      {/* フッター：白い帯にInstagramアイコン */}
+      <div className="relative z-10 w-full bg-white py-6 flex items-center justify-center">
+        <a
+          href="https://www.instagram.com/hideharu.sasa?igsh=Y2Z6c2h5Nmd2Zm5u&utm_source=qr"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Instagram"
+          className="text-[#8A8A8A] hover:text-[#555] transition-colors"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect x="2" y="2" width="20" height="20" rx="5" stroke="currentColor" strokeWidth="1.8" />
+            <circle cx="12" cy="12" r="4.2" stroke="currentColor" strokeWidth="1.8" />
+            <circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" />
+          </svg>
+        </a>
+      </div>
+
       <MinimalBirdModal
         speciesName={selectedSpecies}
         onClose={() => setSelectedSpecies(null)}
