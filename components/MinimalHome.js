@@ -83,7 +83,7 @@ export default function MinimalHome() {
     <div className="relative min-h-screen w-full">
       {/* 背景：画面サイズに固定し、スクロールしても動かない。暗めからスーッと本来の色に */}
       <div
-        className={`fixed inset-0 h-screen w-screen transition-all ease-out ${
+        className={`fixed inset-0 w-screen abl-hero-bg transition-all ease-out ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
         style={{ transitionDuration: "2600ms" }}
@@ -111,7 +111,7 @@ export default function MinimalHome() {
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-[10px] tracking-[2px] text-center mt-2`}
           style={{ transitionDelay: "900ms" }}
         >
-          by Hideharu Sasa
+          by Hideharu Sasa from Angle Matters
         </p>
 
         <div
