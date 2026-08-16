@@ -40,10 +40,21 @@ body {
 .abl-fade {
   opacity: 0;
   transform: translateY(6px);
+  transition: opacity 1.4s ease, transform 1.4s ease;
+}
+.abl-fade.abl-fade-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 🔥 検索窓だけ、現れる瞬間にほんの一瞬ぼやけてからピントが合う演出を付ける */
+.abl-fade-blur {
+  opacity: 0;
+  transform: translateY(6px);
   filter: blur(8px);
   transition: opacity 1.4s ease, transform 1.4s ease, filter 1.4s ease;
 }
-.abl-fade.abl-fade-in {
+.abl-fade-blur.abl-fade-in {
   opacity: 1;
   transform: translateY(0);
   filter: blur(0);

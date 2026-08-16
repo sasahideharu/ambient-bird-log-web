@@ -159,7 +159,7 @@ export default function MinimalHome() {
         </p>
 
         <div
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-10`}
+          className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-10`}
           style={{ transitionDelay: "1500ms" }}
         >
           <input
