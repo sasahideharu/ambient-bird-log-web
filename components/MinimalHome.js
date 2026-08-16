@@ -43,6 +43,16 @@ export default function MinimalHome() {
 
   const [bgRevealed, setBgRevealed] = useState(false);
   const [contentRevealed, setContentRevealed] = useState(false);
+  const [bgHeight, setBgHeight] = useState(null);
+
+  // 🔥 InstagramやLINEのアプリ内ブラウザは、スクロール中にアドレスバーが伸び縮みして
+  //    100vh/100lvhの値がその都度変わってしまい、背景がズームして見えてしまう。
+  //    なので、最初に一度だけ画面の高さを測って固定値（px）として使い、以後は測り直さない。
+  //    後からアドレスバーが縮んで表示領域が広がっても隙間ができないよう、余裕を持たせておく。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setBgHeight(window.innerHeight + 160);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -83,10 +93,13 @@ export default function MinimalHome() {
     <div className="relative min-h-screen w-full">
       {/* 背景：画面サイズに固定し、スクロールしても動かない。暗めからスーッと本来の色に */}
       <div
-        className={`fixed inset-0 w-screen abl-hero-bg transition-all ease-out ${
+        className={`fixed inset-0 w-screen transition-all ease-out ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
-        style={{ transitionDuration: "2600ms" }}
+        style={{
+          transitionDuration: "2600ms",
+          height: bgHeight ? `${bgHeight}px` : "100vh",
+        }}
       >
         <Image
           src="/forest-bg.jpg"
