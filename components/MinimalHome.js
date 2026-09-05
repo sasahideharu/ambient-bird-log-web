@@ -143,46 +143,53 @@ export default function MinimalHome() {
       </div>
 
       {/* コンテンツ */}
-      <div className="relative z-10 min-h-screen w-full flex flex-col items-center px-6 pt-14 pb-10">
-        <h1
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
-          style={{ transitionDelay: "300ms" }}
-        >
-          Ambient Bird Log
-        </h1>
-        <p
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-center mt-2`}
-          style={{ transitionDelay: "900ms" }}
-        >
-          <span className="block text-[10px] tracking-[2px]">by Hideharu Sasa</span>
-          <span className="block text-[7px] tracking-[1.5px] mt-1 opacity-80">from Angle Matters</span>
-        </p>
-
-        <div
-          className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-10`}
-          style={{ transitionDelay: "2400ms", transitionDuration: "2000ms" }}
-        >
-          <input
-            type="text"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            placeholder="What bird sings now?"
-            className="w-full bg-white/10 rounded-xl px-5 py-3 text-white text-sm text-center placeholder:text-white/50 outline-none focus:bg-white/15 transition-colors"
-          />
+      <div className="relative z-10 w-full">
+        {/* 🔥 タイトルだけを画面の高さいっぱいの中で縦センターに配置する */}
+        <div className="min-h-screen w-full flex flex-col items-center justify-center px-6">
+          <h1
+            className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
+            style={{ transitionDelay: "300ms" }}
+          >
+            Ambient Bird Log
+          </h1>
         </div>
 
-        <div
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-6 grid grid-cols-3 gap-2`}
-          style={{ transitionDelay: "5200ms", transitionDuration: "2000ms" }}
-        >
-          {visible.map((s) => (
-            <MinimalThumb key={s.name} species={s} onSelect={setSelectedSpecies} />
-          ))}
-          {visible.length === 0 && (
-            <p className="col-span-3 text-center text-white/50 text-xs py-4">
-              該当する野鳥が見つかりませんでした
-            </p>
-          )}
+        {/* サブタイトル以降は、これまでと同じレイアウト・余白のまま下に続く */}
+        <div className="w-full flex flex-col items-center px-6 pb-10">
+          <p
+            className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-center mt-2`}
+            style={{ transitionDelay: "900ms" }}
+          >
+            <span className="block text-[10px] tracking-[2px]">by Hideharu Sasa</span>
+            <span className="block text-[7px] tracking-[1.5px] mt-1 opacity-80">from Angle Matters</span>
+          </p>
+
+          <div
+            className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-10`}
+            style={{ transitionDelay: "2400ms", transitionDuration: "2000ms" }}
+          >
+            <input
+              type="text"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="What bird sings now?"
+              className="w-full bg-white/10 rounded-xl px-5 py-3 text-white text-sm text-center placeholder:text-white/50 outline-none focus:bg-white/15 transition-colors"
+            />
+          </div>
+
+          <div
+            className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-6 grid grid-cols-3 gap-2`}
+            style={{ transitionDelay: "5200ms", transitionDuration: "2000ms" }}
+          >
+            {visible.map((s) => (
+              <MinimalThumb key={s.name} species={s} onSelect={setSelectedSpecies} />
+            ))}
+            {visible.length === 0 && (
+              <p className="col-span-3 text-center text-white/50 text-xs py-4">
+                該当する野鳥が見つかりませんでした
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
