@@ -5,9 +5,13 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+html, body {
   background-color: #f4f2ec;
   color-scheme: light;
+  /* 🔥 iOS Safariのスクロール時の「バウンド（ゴムのように伸び縮みする）」演出を止める。
+     バウンドして本来のページ範囲より外側が見えると、背景画像ではなくこのbackground-colorが
+     一瞬見えてしまうため、そもそもバウンドさせないようにする */
+  overscroll-behavior-y: none;
 }
 
 /* 信頼度スライダーのつまみ */
