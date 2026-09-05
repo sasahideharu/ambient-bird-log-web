@@ -52,25 +52,24 @@ export default function MinimalHome() {
   const [selectedSpecies, setSelectedSpecies] = useState(null);
   const [orderMap, setOrderMap] = useState(() => ({ ...getSessionOrderMap() }));
 
-  // 🔥 「タイトル〜一覧のまとまりの中心を、画面の縦センターから15%上に置く」を、
-  //    absolute配置ではなく「中身の実際の高さを測って、必要な上余白を逆算する」方式で実現する。
-  //    こうすることで、鳥が増えて中身が長くなっても、タイトルが画面の外に押し出されることがない
-  //    （中身が長すぎる場合は、余白の最小値24pxまで縮まり、そのまま自然に上から並ぶだけになる）
-  const contentRef = useRef(null);
+  // 🔥 「タイトルを、画面の縦センターから15%上（＝上から35%）の位置に最優先で固定する」を、
+  //    タイトル自身の高さだけを測って実現する。中身全体ではなくタイトルだけを測ることで、
+  //    下に続くサブタイトル・検索窓・一覧がどれだけ長くなっても、タイトルの位置は一切変わらない
+  const titleRef = useRef(null);
   const [paddingTop, setPaddingTop] = useState(24);
 
   const recomputePadding = useCallback(() => {
-    if (typeof window === "undefined" || !contentRef.current) return;
-    const contentHeight = contentRef.current.offsetHeight;
+    if (typeof window === "undefined" || !titleRef.current) return;
+    const titleHeight = titleRef.current.offsetHeight;
     const vh = window.innerHeight;
-    const desired = vh * 0.35 - contentHeight / 2;
-    setPaddingTop(Math.max(24, desired));
+    const desired = vh * 0.35 - titleHeight / 2;
+    setPaddingTop(Math.max(0, desired));
   }, []);
 
   useLayoutEffect(() => {
     recomputePadding();
     const ro = new ResizeObserver(() => recomputePadding());
-    if (contentRef.current) ro.observe(contentRef.current);
+    if (titleRef.current) ro.observe(titleRef.current);
     window.addEventListener("resize", recomputePadding);
     return () => {
       ro.disconnect();
@@ -172,13 +171,16 @@ export default function MinimalHome() {
           実際の高さを測ってpaddingTopで調整する（absolute配置だと中身が伸びたときに
           画面の外へはみ出す問題があったため、この方式に変更） */}
       <div className="relative z-10 min-h-screen w-full flex flex-col items-center px-6 pb-10">
-        <div ref={contentRef} className="w-full max-w-sm flex flex-col items-center" style={{ paddingTop }}>
-        <h1
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
-          style={{ transitionDelay: "300ms" }}
-        >
-          Ambient Bird Log
-        </h1>
+        <div className="w-full max-w-sm flex flex-col items-center">
+        <div style={{ paddingTop }}>
+          <h1
+            ref={titleRef}
+            className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
+            style={{ transitionDelay: "300ms" }}
+          >
+            Ambient Bird Log
+          </h1>
+        </div>
         <p
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-center mt-2`}
           style={{ transitionDelay: "900ms" }}
