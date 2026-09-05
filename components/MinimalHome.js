@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
 import { buildSpeciesList } from "../lib/aggregate";
@@ -51,6 +51,32 @@ export default function MinimalHome() {
   const [bgHeight, setBgHeight] = useState(null);
   const [selectedSpecies, setSelectedSpecies] = useState(null);
   const [orderMap, setOrderMap] = useState(() => ({ ...getSessionOrderMap() }));
+
+  // 🔥 「タイトル〜一覧のまとまりの中心を、画面の縦センターから15%上に置く」を、
+  //    absolute配置ではなく「中身の実際の高さを測って、必要な上余白を逆算する」方式で実現する。
+  //    こうすることで、鳥が増えて中身が長くなっても、タイトルが画面の外に押し出されることがない
+  //    （中身が長すぎる場合は、余白の最小値24pxまで縮まり、そのまま自然に上から並ぶだけになる）
+  const contentRef = useRef(null);
+  const [paddingTop, setPaddingTop] = useState(24);
+
+  const recomputePadding = useCallback(() => {
+    if (typeof window === "undefined" || !contentRef.current) return;
+    const contentHeight = contentRef.current.offsetHeight;
+    const vh = window.innerHeight;
+    const desired = vh * 0.35 - contentHeight / 2;
+    setPaddingTop(Math.max(24, desired));
+  }, []);
+
+  useLayoutEffect(() => {
+    recomputePadding();
+    const ro = new ResizeObserver(() => recomputePadding());
+    if (contentRef.current) ro.observe(contentRef.current);
+    window.addEventListener("resize", recomputePadding);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", recomputePadding);
+    };
+  }, [recomputePadding]);
 
   // 🔥 InstagramやLINEのアプリ内ブラウザは、スクロール中にアドレスバーが伸び縮みして
   //    100vh/100lvhの値がその都度変わってしまい、背景がズームして見えてしまう。
@@ -142,12 +168,11 @@ export default function MinimalHome() {
         <div className="absolute inset-0 bg-black/25" />
       </div>
 
-      {/* コンテンツ：タイトル〜一覧のまとまり全体の中心が、画面の縦センターから15%上（＝上から35%の位置）に来るようにする */}
-      <div className="relative z-10 min-h-screen w-full">
-        <div
-          className="absolute left-1/2 w-full max-w-sm px-6 flex flex-col items-center"
-          style={{ top: "35%", transform: "translate(-50%, -50%)" }}
-        >
+      {/* コンテンツ：タイトル〜一覧のまとまりの中心が、画面の縦センターから15%上に来るよう、
+          実際の高さを測ってpaddingTopで調整する（absolute配置だと中身が伸びたときに
+          画面の外へはみ出す問題があったため、この方式に変更） */}
+      <div className="relative z-10 min-h-screen w-full flex flex-col items-center px-6 pb-10">
+        <div ref={contentRef} className="w-full max-w-sm flex flex-col items-center" style={{ paddingTop }}>
         <h1
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
           style={{ transitionDelay: "300ms" }}
