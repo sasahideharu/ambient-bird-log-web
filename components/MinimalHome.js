@@ -142,8 +142,12 @@ export default function MinimalHome() {
         <div className="absolute inset-0 bg-black/25" />
       </div>
 
-      {/* コンテンツ：タイトル〜一覧をひとまとまりとして、画面の中で縦センターに寄せる */}
-      <div className="relative z-10 min-h-screen w-full flex flex-col items-center justify-center px-6 pb-10">
+      {/* コンテンツ：タイトル〜一覧のまとまり全体の中心が、画面の縦センターから15%上（＝上から35%の位置）に来るようにする */}
+      <div className="relative z-10 min-h-screen w-full">
+        <div
+          className="absolute left-1/2 w-full max-w-sm px-6 flex flex-col items-center"
+          style={{ top: "35%", transform: "translate(-50%, -50%)" }}
+        >
         <h1
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
           style={{ transitionDelay: "300ms" }}
@@ -159,7 +163,7 @@ export default function MinimalHome() {
         </p>
 
         <div
-          className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-10`}
+          className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full mt-10`}
           style={{ transitionDelay: "2400ms", transitionDuration: "2000ms" }}
         >
           <input
@@ -172,7 +176,7 @@ export default function MinimalHome() {
         </div>
 
         <div
-          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full max-w-sm mt-6 grid grid-cols-3 gap-2`}
+          className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full mt-6 grid grid-cols-3 gap-2`}
           style={{ transitionDelay: "5200ms", transitionDuration: "2000ms" }}
         >
           {visible.map((s) => (
@@ -184,9 +188,7 @@ export default function MinimalHome() {
             </p>
           )}
         </div>
-
-        {/* 🔥 中央寄せの基準を少しだけ下にずらすための余白（＝見た目上、全体が少し上寄りになる） */}
-        <div className="h-16 w-full flex-shrink-0" />
+        </div>
       </div>
 
       {/* フッター：白い帯にInstagramアイコンと著作権表記 */}
