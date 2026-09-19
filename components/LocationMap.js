@@ -62,7 +62,7 @@ export default function LocationMap({ locations }) {
                   最終観測 {loc.lastSeen}
                 </div>
                 <Link
-                  href={`/loc/${encodeURIComponent(loc.name)}`}
+                  href={`/loc?name=${encodeURIComponent(loc.name)}`}
                   style={{ fontSize: 12, color: "#3F6C74", fontWeight: 700 }}
                 >
                   詳細を見る ›

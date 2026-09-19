@@ -1,28 +1,17 @@
 "use client";
 
-import { useState, useEffect, useMemo, use } from "react";
+import { Suspense, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { fetchLocationDetail } from "../../../lib/locationDetail";
-import { getAudioUrl } from "../../../lib/queries";
-import AudioSpectrogramCard from "../../../components/AudioSpectrogramCard";
-import dynamic from "next/dynamic";
+import { notFound, useSearchParams } from "next/navigation";
+import { fetchDateDetail } from "../../lib/dateDetail";
+import { getAudioUrl } from "../../lib/queries";
+import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
 
-// 🔥 Leafletはブラウザ専用のためSSRを無効化して読み込む
-const LocationMap = dynamic(() => import("../../../components/LocationMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="mx-4 mb-3 rounded-2xl border-[3px] border-cardBorder bg-white h-32 flex items-center justify-center text-xs text-inkMuted">
-      地図を読み込み中...
-    </div>
-  ),
-});
+// 🔥 アプリ化（静的書き出し）に対応するため、URLは /date?value=2026-07-26 の形にしている
+function DateDetailInner() {
+  const value = useSearchParams().get("value") ?? "";
 
-export default function LocationDetailPage({ params }) {
-  const { name } = use(params);
-  const locationName = decodeURIComponent(name);
-
-  const [loc, setLoc] = useState(null);
+  const [day, setDay] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [minConfidence, setMinConfidence] = useState(50);
@@ -30,12 +19,12 @@ export default function LocationDetailPage({ params }) {
   useEffect(() => {
     async function load() {
       try {
-        const result = await fetchLocationDetail(locationName);
+        const result = await fetchDateDetail(value);
         if (!result) {
           notFound();
           return;
         }
-        setLoc(result);
+        setDay(result);
       } catch (err) {
         console.error(err);
         setLoadError("データの取得に失敗しました。");
@@ -44,54 +33,36 @@ export default function LocationDetailPage({ params }) {
       }
     }
     load();
-  }, [locationName]);
+  }, [value]);
 
   const visibleRecords = useMemo(() => {
-    if (!loc) return [];
-    return loc.records.filter((r) => r.confidence >= minConfidence);
-  }, [loc, minConfidence]);
+    if (!day) return [];
+    return day.records.filter((r) => r.confidence >= minConfidence);
+  }, [day, minConfidence]);
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-page p-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         <Link href="/" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
-          ‹ 観測地点に戻る
+          ‹ 観測日に戻る
         </Link>
 
         {loading && <p className="text-center text-xs text-inkMuted py-10">読み込み中...</p>}
         {loadError && <p className="text-center text-xs text-red-500 py-10 px-6">{loadError}</p>}
 
-        {!loading && !loadError && loc && (
+        {!loading && !loadError && day && (
           <>
             <div className="mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4 flex gap-3.5 items-center">
-              <div
-                className="w-[60px] h-[60px] rounded-full flex items-center justify-center text-3xl flex-shrink-0 border-[3px] border-white shadow-[0_0_0_2px_#8FC2CB]"
-                style={{ backgroundColor: "#F6E1E4" }}
-              >
-                📍
+              <div className="w-[60px] h-[60px] rounded-xl bg-[#E6DEEC] border-[3px] border-white shadow-[0_0_0_2px_#C7B8D2] flex items-center justify-center flex-shrink-0">
+                <div className="font-display text-lg">{day.date}</div>
               </div>
               <div>
-                <div className="font-display text-xl">{loc.name}</div>
+                <div className="font-display text-xl">{day.date} の記録</div>
                 <div className="text-[11px] text-inkMuted font-bold">
-                  検出種数 {loc.speciesCount}・記録数 {loc.records.length}件
+                  検出種数 {day.speciesCount}・観測地点 {day.locationCount}
                 </div>
               </div>
             </div>
-
-            {loc.latitude != null && loc.longitude != null && (
-              <LocationMap
-                locations={[
-                  {
-                    name: loc.name,
-                    latitude: loc.latitude,
-                    longitude: loc.longitude,
-                    speciesCount: loc.speciesCount,
-                    recordCount: loc.records.length,
-                    lastSeen: loc.lastSeen,
-                  },
-                ]}
-              />
-            )}
 
             <div className="mx-4 mb-3.5 bg-white border-[3px] border-cardBorder rounded-2xl px-4 py-3">
               <label className="text-xs font-bold text-ink">
@@ -124,7 +95,7 @@ export default function LocationDetailPage({ params }) {
                     <AudioSpectrogramCard src={audioUrl} startSec={r.startSec} endSec={r.endSec} />
                     <div className="flex gap-1.5 mt-2">
                       <span className="text-[10px] font-bold bg-page border-2 border-cardBorder rounded-lg px-2 py-1">
-                        📅 {r.date}
+                        📍 {r.location}
                       </span>
                       <span className="text-[10px] font-bold bg-page border-2 border-cardBorder rounded-lg px-2 py-1">
                         🕒 {r.time}
@@ -143,5 +114,13 @@ export default function LocationDetailPage({ params }) {
         )}
       </div>
     </div>
+  );
+}
+
+export default function DateDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <DateDetailInner />
+    </Suspense>
   );
 }

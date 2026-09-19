@@ -32,7 +32,7 @@ function SpeciesThumb({ species: s }) {
 
   return (
     <Link
-      href={`/bird/${encodeURIComponent(s.name)}`}
+      href={`/bird?name=${encodeURIComponent(s.name)}`}
       className="rounded-2xl overflow-hidden border-[3px] border-cardBorder bg-white relative block hover:border-accent transition-colors"
     >
       {showImage ? (
@@ -240,7 +240,7 @@ export default function AdminHome() {
             {!loading &&
               locations.map((loc) => (
                 <Link
-                  href={`/loc/${encodeURIComponent(loc.name)}`}
+                  href={`/loc?name=${encodeURIComponent(loc.name)}`}
                   key={loc.name}
                   className="w-full flex items-center gap-3 bg-white border-[3px] border-cardBorder rounded-2xl p-3 mb-3 hover:border-accent transition-colors"
                 >
@@ -270,7 +270,7 @@ export default function AdminHome() {
             {!loading &&
               dates.map((d) => (
                 <Link
-                  href={`/date/${d.isoDate}`}
+                  href={`/date?value=${d.isoDate}`}
                   key={d.isoDate}
                   className="w-full flex items-center gap-3 bg-white border-[3px] border-cardBorder rounded-2xl p-3 mb-3 hover:border-accent transition-colors"
                 >

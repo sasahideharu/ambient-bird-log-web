@@ -1,18 +1,18 @@
 "use client";
 
-import { useState, useEffect, useMemo, use } from "react";
+import { Suspense, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { fetchSpeciesDetail } from "../../../lib/speciesDetail";
-import { getAudioUrl } from "../../../lib/queries";
-import AudioSpectrogramCard from "../../../components/AudioSpectrogramCard";
+import { notFound, useSearchParams } from "next/navigation";
+import { fetchSpeciesDetail } from "../../lib/speciesDetail";
+import { getAudioUrl } from "../../lib/queries";
+import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
 
 const PLACEHOLDER_COLOR = "#F6E1E4";
 const PLACEHOLDER_EMOJI = "🐦";
 
-export default function BirdDetailPage({ params }) {
-  const { slug } = use(params);
-  const commonName = decodeURIComponent(slug);
+// 🔥 アプリ化（静的書き出し）に対応するため、URLは /bird?name=メジロ の形にしている
+function BirdDetailInner() {
+  const commonName = useSearchParams().get("name") ?? "";
 
   const [bird, setBird] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -185,5 +185,13 @@ export default function BirdDetailPage({ params }) {
         )}
       </div>
     </div>
+  );
+}
+
+export default function BirdDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <BirdDetailInner />
+    </Suspense>
   );
 }
