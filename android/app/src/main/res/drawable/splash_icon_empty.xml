@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 起動画面に出すアイコン。何も描かない（透明）ことで、起動画面を真っ黒にする -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <size android:width="48dp" android:height="48dp" />
+    <solid android:color="@android:color/transparent" />
+</shape>

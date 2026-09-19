@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- アプリの背景色（黒）。起動画面・ウィンドウの背景に使う -->
+    <color name="ablBackground">#000000</color>
+</resources>

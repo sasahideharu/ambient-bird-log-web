@@ -14,6 +14,12 @@ html, body {
   overscroll-behavior-y: none;
 }
 
+/* 🔥 アプリ版：起動直後、中身が描かれるまでの背景を黒にする（layout.js が html に abl-app を付ける） */
+html.abl-app,
+html.abl-app body {
+  background-color: #000;
+}
+
 /* 信頼度スライダーのつまみ */
 .abl-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
