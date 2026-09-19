@@ -10,6 +10,8 @@ import {
   sortWithFixedTail,
 } from "../lib/speciesOrder";
 import MinimalBirdModal from "./MinimalBirdModal";
+import OfflineSavePanel from "./OfflineSavePanel";
+import { isNativeApp, onUsingSavedChange } from "../lib/offline";
 
 const CONFIDENCE_DEFAULT = 60;
 
@@ -52,6 +54,16 @@ export default function MinimalHome() {
   const [selectedSpecies, setSelectedSpecies] = useState(null);
   const [orderMap, setOrderMap] = useState(() => ({ ...getSessionOrderMap() }));
 
+  // 🔥 アプリ（iPhone/Android）のときだけ「オフライン保存」を出す。
+  //    電波が無くて保存データを表示している間は、その旨を小さく表示する
+  const [isApp, setIsApp] = useState(false);
+  const [usingSaved, setUsingSaved] = useState(false);
+  const [offlineOpen, setOfflineOpen] = useState(false);
+  useEffect(() => {
+    setIsApp(isNativeApp());
+    return onUsingSavedChange(setUsingSaved);
+  }, []);
+
   // 🔥 「タイトルを、画面の縦センターから15%上（＝上から35%）の位置に最優先で固定する」を、
   //    タイトル自身の高さだけを測って実現する。中身全体ではなくタイトルだけを測ることで、
   //    下に続くサブタイトル・検索窓・一覧がどれだけ長くなっても、タイトルの位置は一切変わらない
@@ -86,21 +98,23 @@ export default function MinimalHome() {
     setBgHeight(window.innerHeight + 160);
   }, []);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [detections, images] = await Promise.all([
-          fetchDetections(),
-          fetchBirdImages(),
-        ]);
-        setRawDetections(detections);
-        setBirdImages(images);
-      } catch (err) {
-        console.error(err);
-      }
+  // 🔥 オフライン保存・削除のあとにも呼んで、写真などの参照先（ネット／端末内）を最新にする
+  const loadData = useCallback(async () => {
+    try {
+      const [detections, images] = await Promise.all([
+        fetchDetections(),
+        fetchBirdImages(),
+      ]);
+      setRawDetections(detections);
+      setBirdImages(images);
+    } catch (err) {
+      console.error(err);
     }
-    load();
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   // 🔥 データが読み込まれたら、まだ順番が決まっていない鳥にだけ新しくランダムな順位を割り当てて保存する
   //    （AdminHomeと同じsessionOrderMapを参照するので、両画面で同じ並びになる）
@@ -220,6 +234,14 @@ export default function MinimalHome() {
 
       {/* フッター：白い帯にInstagramアイコンと著作権表記 */}
       <div className="relative z-10 w-full bg-white py-6 flex flex-col items-center justify-center gap-3">
+        {isApp && (
+          <button
+            onClick={() => setOfflineOpen(true)}
+            className="text-[11px] text-[#8A8A8A] hover:text-[#555] underline underline-offset-2 transition-colors"
+          >
+            オフライン保存
+          </button>
+        )}
         <a
           href="https://www.instagram.com/hideharu.sasa?igsh=Y2Z6c2h5Nmd2Zm5u&utm_source=qr"
           target="_blank"
@@ -244,10 +266,24 @@ export default function MinimalHome() {
         </p>
       </div>
 
+      {usingSaved && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-40 rounded-full bg-black/60 backdrop-blur px-3 py-1 text-[10px] text-white/80 tracking-wide">
+          オフライン：保存データを表示中
+        </div>
+      )}
+
       <MinimalBirdModal
         speciesName={selectedSpecies}
         onClose={() => setSelectedSpecies(null)}
       />
+
+      {isApp && (
+        <OfflineSavePanel
+          open={offlineOpen}
+          onClose={() => setOfflineOpen(false)}
+          onChanged={loadData}
+        />
+      )}
     </div>
   );
 }
