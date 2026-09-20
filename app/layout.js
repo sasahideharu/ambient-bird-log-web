@@ -1,4 +1,14 @@
+import { Josefin_Sans } from "next/font/google";
 import "./globals.css";
+
+// 🔥 タイトルなどの英字のフォント（Josefin Sans）。以前は Google Fonts から読み込んでいたため、
+//    電波が無いと代わりの字体になっていた。ビルドのときに取り込んで、アプリ／サイトの中に同梱する
+const josefin = Josefin_Sans({
+  subsets: ["latin"],
+  weight: ["300", "400", "500"],
+  display: "swap",
+  variable: "--font-josefin",
+});
 
 export const metadata = {
   title: "Ambient Bird Log",
@@ -16,8 +26,9 @@ export const viewport = {
 const isApp = process.env.BUILD_TARGET === "app";
 
 export default function RootLayout({ children }) {
+  const htmlClass = [josefin.variable, isApp ? "abl-app" : ""].filter(Boolean).join(" ");
   return (
-    <html lang="ja" className={isApp ? "abl-app" : undefined}>
+    <html lang="ja" className={htmlClass}>
       <body className="font-body text-ink">{children}</body>
     </html>
   );

@@ -32,7 +32,7 @@ module.exports = {
           "'Yu Gothic'",
           "sans-serif",
         ],
-        hero: ["'Josefin Sans'", "sans-serif"],
+        hero: ["var(--font-josefin)", "'Josefin Sans'", "sans-serif"],
       },
     },
   },

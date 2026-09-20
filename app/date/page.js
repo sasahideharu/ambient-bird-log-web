@@ -6,9 +6,11 @@ import { notFound, useSearchParams } from "next/navigation";
 import { fetchDateDetail } from "../../lib/dateDetail";
 import { getAudioUrl } from "../../lib/queries";
 import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
+import { useSystemBars } from "../../lib/useSystemBars";
 
 // 🔥 アプリ化（静的書き出し）に対応するため、URLは /date?value=2026-07-26 の形にしている
 function DateDetailInner() {
+  useSystemBars("light"); // 明るい背景：バーの文字は黒
   const value = useSearchParams().get("value") ?? "";
 
   const [day, setDay] = useState(null);
@@ -41,7 +43,7 @@ function DateDetailInner() {
   }, [day, minConfidence]);
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-page p-6">
+    <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         <Link href="/" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
           ‹ 観測日に戻る

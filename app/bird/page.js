@@ -6,12 +6,14 @@ import { notFound, useSearchParams } from "next/navigation";
 import { fetchSpeciesDetail } from "../../lib/speciesDetail";
 import { getAudioUrl } from "../../lib/queries";
 import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
+import { useSystemBars } from "../../lib/useSystemBars";
 
 const PLACEHOLDER_COLOR = "#F6E1E4";
 const PLACEHOLDER_EMOJI = "🐦";
 
 // 🔥 アプリ化（静的書き出し）に対応するため、URLは /bird?name=メジロ の形にしている
 function BirdDetailInner() {
+  useSystemBars("light"); // 明るい背景：バーの文字は黒
   const commonName = useSearchParams().get("name") ?? "";
 
   const [bird, setBird] = useState(null);
@@ -52,7 +54,7 @@ function BirdDetailInner() {
   }, [bird]);
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-page p-6">
+    <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         <Link href="/" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
           ‹ 鳥から探すに戻る

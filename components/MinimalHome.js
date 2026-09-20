@@ -7,6 +7,7 @@ import { fetchDetections, fetchBirdImages } from "../lib/queries";
 import { useLoginState } from "../lib/useLoginState";
 import { signOut } from "../lib/auth";
 import LoginPanel from "./LoginPanel";
+import { useSystemBars } from "../lib/useSystemBars";
 import { buildSpeciesList } from "../lib/aggregate";
 import {
   getSessionOrderMap,
@@ -49,6 +50,7 @@ function MinimalThumb({ species: s, onSelect }) {
 
 // promptLogin: 管理画面（?admin=true）にログイン無しで来たときに、最初からログイン画面を開く
 export default function MinimalHome({ promptLogin = false }) {
+  useSystemBars("dark"); // 暗い背景：バーの文字は白
   const login = useLoginState();
   const [loginOpen, setLoginOpen] = useState(promptLogin);
   const [rawDetections, setRawDetections] = useState([]);
@@ -240,7 +242,10 @@ export default function MinimalHome({ promptLogin = false }) {
       </div>
 
       {/* フッター：白い帯にInstagramアイコンと著作権表記 */}
-      <div className="relative z-10 w-full bg-white py-6 flex flex-col items-center justify-center gap-3">
+      <div
+        className="relative z-10 w-full bg-white pt-6 flex flex-col items-center justify-center gap-3"
+        style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
+      >
         {/* ログインの有無で、使えるものを分ける（ログイン中だけ、緯度経度・地図・管理画面・オフライン保存） */}
         {login.ready && (
           <div className="w-full px-4 flex flex-col items-center gap-2 text-[11px] text-[#8A8A8A]">
@@ -314,7 +319,9 @@ export default function MinimalHome({ promptLogin = false }) {
       </div>
 
       {usingSaved && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-40 rounded-full bg-black/60 backdrop-blur px-3 py-1 text-[10px] text-white/80 tracking-wide">
+        <div
+          style={{ top: "calc(env(safe-area-inset-top) + 0.75rem)" }}
+          className="fixed left-1/2 -translate-x-1/2 z-40 rounded-full bg-black/60 backdrop-blur px-3 py-1 text-[10px] text-white/80 tracking-wide">
           オフライン：保存データを表示中
         </div>
       )}

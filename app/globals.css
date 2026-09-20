@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;500&display=swap");
 @import "leaflet/dist/leaflet.css";
 
 @tailwind base;
@@ -18,6 +17,14 @@ html, body {
 html.abl-app,
 html.abl-app body {
   background-color: #000;
+}
+
+/* 🔥 画面いっぱい表示（Android 15・iPhone のノッチ）で、ステータスバーや操作ボタンの下に
+   内容が潜り込まないよう、ページの上下に「画面の余白」を足す。余白が無い環境（PCなど）では、
+   これまでと同じ 1.5rem のまま */
+.abl-page-safe {
+  padding-top: max(1.5rem, calc(env(safe-area-inset-top) + 0.75rem));
+  padding-bottom: max(1.5rem, calc(env(safe-area-inset-bottom) + 0.75rem));
 }
 
 /* 信頼度スライダーのつまみ */

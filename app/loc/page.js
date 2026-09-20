@@ -6,6 +6,7 @@ import { notFound, useSearchParams } from "next/navigation";
 import { fetchLocationDetail } from "../../lib/locationDetail";
 import { getAudioUrl } from "../../lib/queries";
 import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
+import { useSystemBars } from "../../lib/useSystemBars";
 import dynamic from "next/dynamic";
 
 // 🔥 Leafletはブラウザ専用のためSSRを無効化して読み込む
@@ -20,6 +21,7 @@ const LocationMap = dynamic(() => import("../../components/LocationMap"), {
 
 // 🔥 アプリ化（静的書き出し）に対応するため、URLは /loc?name=庭 の形にしている
 function LocationDetailInner() {
+  useSystemBars("light"); // 明るい背景：バーの文字は黒
   const locationName = useSearchParams().get("name") ?? "";
 
   const [loc, setLoc] = useState(null);
@@ -52,7 +54,7 @@ function LocationDetailInner() {
   }, [loc, minConfidence]);
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-page p-6">
+    <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         <Link href="/" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
           ‹ 観測地点に戻る

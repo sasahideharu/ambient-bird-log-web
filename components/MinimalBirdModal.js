@@ -58,6 +58,7 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
       className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-500 ${
         visible ? "opacity-100" : "opacity-0"
       }`}
+      style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
       onClick={onClose}
     >
       <div className="absolute inset-0 bg-black/45" />
@@ -66,7 +67,10 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
         className={`relative rounded-[28px] overflow-hidden bg-black/5 backdrop-blur-2xl border border-white/20 transition-all duration-500 ${
           visible ? "opacity-100 scale-100" : "opacity-0 scale-95"
         }`}
-        style={{ width: "90vw", height: "90vh" }}
+        style={{
+          width: "90vw",
+          height: "min(90vh, calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem))",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <button

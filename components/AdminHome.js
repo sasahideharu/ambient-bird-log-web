@@ -10,6 +10,7 @@ import {
   sortWithFixedTail,
 } from "../lib/speciesOrder";
 import dynamic from "next/dynamic";
+import { useSystemBars } from "../lib/useSystemBars";
 
 // 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む
 const LocationMap = dynamic(() => import("./LocationMap"), {
@@ -61,6 +62,7 @@ function SpeciesThumb({ species: s }) {
 }
 
 export default function AdminHome() {
+  useSystemBars("light"); // 明るい背景：バーの文字は黒
   const [activeTab, setActiveTab] = useState("species");
   const [minConfidence, setMinConfidence] = useState(60);
   const [keyword, setKeyword] = useState("");
@@ -129,7 +131,7 @@ export default function AdminHome() {
   const dates = useMemo(() => buildDateList(rawDetections), [rawDetections]);
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-page p-6">
+    <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         {/* ヘッダーバナー */}
         <div className="bg-header px-6 pt-6 pb-6 rounded-b-3xl">
