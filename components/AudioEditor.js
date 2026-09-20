@@ -20,6 +20,7 @@ import {
 } from "../lib/audioFocus";
 import { encodeWav } from "../lib/wav";
 import { listEdits, saveEdit, deleteEdit, rowToSelection, editKey } from "../lib/audioEdits";
+import AudioPublishPanel from "./AudioPublishPanel";
 
 const MAX_FREQ_HZ = 13500; // スペクトログラムの上限（AudioSpectrogramCard と同じ）
 const CANVAS_H = 300;
@@ -504,8 +505,9 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
     return [...selections].reverse().sort((a, b) => (a.id === activeId ? -1 : b.id === activeId ? 1 : 0));
   }
 
+  // 公開した範囲は、もう変えられない（変えようとしても、無視する）
   function updateSelection(id, patch) {
-    setSelections((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    setSelections((prev) => prev.map((s) => (s.id === id && !s.published ? { ...s, ...patch } : s)));
     cacheRef.current.clear();
   }
 
@@ -1065,10 +1067,26 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
           </label>
 
           <p className="mt-3 text-[10px] text-inkMuted leading-relaxed">
-            ※ 範囲と下げ方の設定は、保存できます（自分だけに見えます。保存した範囲は、次に開いたときにも出ます）。加工した音の書き出し（再解析・公開）は、次の段階で追加します。
+            ※ 範囲と下げ方の設定は、保存できます（自分だけに見えます。保存した範囲は、次に開いたときにも出ます）。保存したあと、下の「書き出して、公開する」で、加工した音を MP3 にして、解析・公開できます。
           </p>
         </div>
       )}
+
+      {/* 書き出し・解析・公開：範囲ごとに持つ（別の範囲を選んでも、解析の結果が消えないように、隠すだけにする） */}
+      {status === "ready" && sourceName &&
+        selections.map((s) => (
+          <div key={s.id} hidden={s.id !== activeId}>
+            <AudioPublishPanel
+              sourceName={sourceName}
+              sel={s}
+              normalize={normalize}
+              dirty={isDirty(s)}
+              sampleRate={audioRef.current?.sampleRate ?? 48000}
+              getFocused={getFocused}
+              onPublished={(id, exportedName) => updateSelection(id, { published: true, exportedName })}
+            />
+          </div>
+        ))}
     </div>
   );
 }
