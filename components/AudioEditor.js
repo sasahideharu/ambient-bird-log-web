@@ -507,6 +507,11 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   }
 
   // 公開した範囲は、もう変えられない（変えようとしても、無視する）
+  // 公開を取り下げたあと：この範囲を、編集できる状態（下書き）に戻す
+  function unlockSelection(id) {
+    setSelections((prev) => prev.map((s) => (s.id === id ? { ...s, published: false } : s)));
+  }
+
   function updateSelection(id, patch) {
     setSelections((prev) => prev.map((s) => (s.id === id && !s.published ? { ...s, ...patch } : s)));
     cacheRef.current.clear();
@@ -882,7 +887,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
               {!sourceName
                 ? "（ファイルを選んで開いたときは、保存できません）"
                 : active.published
-                  ? "公開済み（直せません）"
+                  ? "公開済み（直すには、下の「公開を取り下げて、編集し直す」）"
                   : active.dbId == null
                     ? "未保存"
                     : isDirty(active)
@@ -1085,6 +1090,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
               sampleRate={audioRef.current?.sampleRate ?? 48000}
               getFocused={getFocused}
               onPublished={(id, exportedName) => updateSelection(id, { published: true, exportedName })}
+              onUnpublished={unlockSelection}
             />
           </div>
         ))}

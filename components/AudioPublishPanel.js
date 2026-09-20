@@ -10,6 +10,7 @@ import {
   uploadExportedMp3,
   markExported,
   markPublished,
+  unpublishEdit,
 } from "../lib/audioEdits";
 import { analyzeMp3Files } from "../lib/analyzerClient";
 import { runImport } from "../lib/importData";
@@ -29,9 +30,9 @@ const MIN_CONF_OPTIONS = [
 // 🔥 編集した範囲の「書き出し → 解析 → 公開」（管理者だけ）。
 //    ① 保存した設定で音を加工して、MP3 にして、保管場所に保存（名前：<元の名前>_e<連番>.mp3）
 //    ② サーバー（BirdNET）で解析して、結果を見る（まだ、みんなには見えない）
-//    ③ 「公開する」で、記録を登録する。公開したあとは、もう直せない・消せない（設定は自分だけに見える）
+//    ③ 「公開する」で、記録を登録する（設定は自分だけに見える）。公開したあとは、「公開を取り下げて、編集し直す」「公開をやめる」ができる（取り下げの間、記録は、みんなから見えない）
 //    sel：編集画面の範囲（保存済みで、変更が無いものだけが、書き出せる）／getFocused：加工した音（チャンネルの配列）を返す関数
-export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, sampleRate, getFocused, onPublished }) {
+export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, sampleRate, getFocused, onPublished, onUnpublished }) {
   const [minConf, setMinConf] = useState("0.1");
   const [useFilter, setUseFilter] = useState(true); // 場所＋時期で、鳥を絞り込む（標準：オン）
   const [phase, setPhase] = useState("idle"); // idle | working | publishing
@@ -41,6 +42,10 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
   const [analysis, setAnalysis] = useState(null); // { key, results, meta, warnings, elapsedSec }
   const [publishResult, setPublishResult] = useState(null);
   const [confirming, setConfirming] = useState(false); // 「本当に公開しますか？」の確認を出している
+  const [unpublishMode, setUnpublishMode] = useState(null); // 取り下げの確認を出している："reedit"（編集し直す）| "stop"（公開をやめる）
+  const [unpublishBusy, setUnpublishBusy] = useState(false);
+  const [unpublishError, setUnpublishError] = useState(null);
+  const [notice, setNotice] = useState(null); // 取り下げたあとの案内
 
   const name = sel.seq ? exportedName(sourceName, sel.seq) : null; // 保存して連番が決まるまでは、名前も無い
   const currentKey = editKey(sel, normalize);
@@ -72,6 +77,31 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
   }, [records]);
   const stale = !!analysis && analysis.key !== currentKey; // 解析したあとに、設定を変えた
 
+  // 公開を取り下げる（記録を消して、下書きに戻す）。mode："reedit"＝編集し直す／"stop"＝公開をやめる
+  async function handleUnpublish(mode) {
+    setUnpublishBusy(true);
+    setUnpublishError(null);
+    try {
+      const res = await unpublishEdit(sel.dbId);
+      const n = res?.detections_deleted ?? 0;
+      setNotice(
+        mode === "reedit"
+          ? `公開を取り下げました（記録 ${n}件を、みんなの画面から外しました）。長さなどを直して、「設定を保存」→「書き出して、解析する」→「公開する」の順に進むと、もう一度、公開できます。`
+          : `公開をやめました（記録 ${n}件を、みんなの画面から外しました）。設定は、下書きとして残っています。不要なら「この範囲を消す」で消せます。もう一度公開するときは、書き出して、解析してから、公開します。`
+      );
+      setUnpublishMode(null);
+      setPublishResult(null);
+      setExported(null);
+      setAnalysis(null);
+      onUnpublished?.(sel.id);
+    } catch (err) {
+      console.error(err);
+      setUnpublishError(`取り下げできませんでした（${err?.message ?? err}）。何も変わっていません。通信やログインの状態を確認して、もう一度お試しください。`);
+    } finally {
+      setUnpublishBusy(false);
+    }
+  }
+
   // 公開済み
   if (sel.published) {
     return (
@@ -80,8 +110,61 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
         <p className="mt-1 text-[11px] text-inkMuted leading-relaxed break-all">
           {sel.exportedName ?? name} として公開しています。
           {publishResult && `記録 ${publishResult.count}件を登録しました（合計 ${publishResult.before}件 → ${publishResult.after}件）。`}
-          公開したものは、直したり、消したりできません。範囲や下げ方の設定は、自分だけに見えます。
+          範囲や下げ方の設定は、自分だけに見えます。公開したものを直したいときは、下のボタンで、公開を取り下げてください（取り下げの間、記録は、みんなから見えません）。
         </p>
+
+        {unpublishMode ? (
+          // 確認は、画面の中に出す（ブラウザの確認ダイアログは、出ない環境があるため）
+          <div className="mt-3 rounded-xl border-[3px] border-red-300 bg-red-50 p-3">
+            <div className="text-xs font-bold text-red-500">
+              {unpublishMode === "reedit" ? "公開を取り下げて、編集し直しますか？" : "公開をやめますか？"}
+            </div>
+            <ul className="mt-1 list-disc pl-4 text-[11px] text-ink leading-relaxed">
+              <li>「抽出{sel.seq}」の記録（{sel.exportedName ?? name}）が、みんなの画面から消えます（記録は、削除されます）</li>
+              <li>あなたの確認（確定・修正）と、元の録音・書き出した音声ファイルは、残ります</li>
+              {unpublishMode === "reedit" ? (
+                <li>取り下げたあと、長さなどを直して、もう一度「書き出して、解析する」→「公開する」を行うと、また見えるようになります。直さずに放置すると、見えないままです</li>
+              ) : (
+                <li>設定は、下書きとして残ります（不要なら「この範囲を消す」で消せます。もう一度公開することもできます）</li>
+              )}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => handleUnpublish(unpublishMode)}
+                disabled={unpublishBusy}
+                className="flex-1 rounded-xl bg-red-500 text-white text-sm font-bold py-2.5 disabled:opacity-40"
+              >
+                {unpublishBusy ? "処理中…" : unpublishMode === "reedit" ? "取り下げて、編集し直す" : "公開をやめる"}
+              </button>
+              <button
+                onClick={() => {
+                  setUnpublishMode(null);
+                  setUnpublishError(null);
+                }}
+                disabled={unpublishBusy}
+                className="flex-1 rounded-xl border-2 border-cardBorder bg-white text-sm font-bold py-2.5 text-[#3F6C74] disabled:opacity-40"
+              >
+                やめる
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-col gap-2">
+            <button
+              onClick={() => setUnpublishMode("reedit")}
+              className="w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-2.5"
+            >
+              ✏ 公開を取り下げて、編集し直す
+            </button>
+            <button
+              onClick={() => setUnpublishMode("stop")}
+              className="w-full rounded-xl border-2 border-red-300 bg-white text-red-500 text-sm font-bold py-2.5"
+            >
+              🚫 公開をやめる
+            </button>
+          </div>
+        )}
+        {unpublishError && <p className="mt-2 text-[11px] text-red-500 leading-relaxed break-all">{unpublishError}</p>}
       </div>
     );
   }
@@ -171,6 +254,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
 
   return (
     <div className={cardClass}>
+      {notice && <p className="mb-3 rounded-xl bg-[#EEF5F6] p-3 text-[11px] text-[#3F6C74] leading-relaxed">{notice}</p>}
       <div className="text-xs font-bold text-ink mb-1">🚀 書き出して、公開する</div>
       <p className="text-[11px] text-inkMuted leading-relaxed">
         保存した設定で音を加工して、MP3 にします（{name ?? "―"}）。サーバーで解析して、結果を確かめてから、公開します。
@@ -267,12 +351,12 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
                     <li>
                       「抽出{sel.seq}」の記録 {records.length}件（鳥 {speciesList.length}種）が、みんなに見えるようになります
                     </li>
-                    <li>公開したあとは、直したり、消したりできません（元の録音は、そのまま残ります）</li>
+                    <li>公開したあとも、「公開を取り下げて、編集し直す」ことができます（取り下げの間、記録は、みんなから見えなくなります）。元の録音は、そのまま残ります</li>
                     <li>範囲や下げ方の設定は、自分だけに見えます</li>
                   </ul>
                   <div className="mt-3 flex gap-2">
                     <button onClick={handlePublish} className="flex-1 rounded-xl bg-red-500 text-white text-sm font-bold py-2.5">
-                      公開する（取り消せません）
+                      公開する
                     </button>
                     <button
                       onClick={() => setConfirming(false)}
@@ -293,7 +377,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
               )}
               {phase === "publishing" && progress && <p className="mt-2 text-center text-[11px] text-inkMuted">{progress}</p>}
               <p className="mt-2 text-[10px] text-inkMuted leading-relaxed">
-                公開すると、記録は、ふつうの録音と同じように、みんなに見えて、集計にも数えられます（「編集（元：{sourceName.replace(/\.mp3$/, "")}）」の印が付きます）。公開したあとは、直したり、消したりできません。
+                公開すると、記録は、ふつうの録音と同じように、みんなに見えて、集計にも数えられます（「編集（元：{sourceName.replace(/\.mp3$/, "")}）」の印が付きます）。公開したあとも、取り下げて、直せます。
               </p>
             </>
           )}
