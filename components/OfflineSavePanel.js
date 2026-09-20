@@ -130,7 +130,7 @@ export default function OfflineSavePanel({ open, onClose, onChanged }) {
 
         <p className="mt-4 text-[11px] leading-relaxed text-white/60">
           各鳥の信頼度{MIN_CONFIDENCE_PERCENT}%以上の上位{TOP_PER_SPECIES}件の録音と、鳥の写真を、この端末に保存します。
-          電波が無い場所でも見られるようになります。Wi-Fiでの実行がおすすめです（約100MB）。
+          電波が無い場所でも見られるようになります。Wi-Fiでの実行がおすすめです（約40MB）。
         </p>
 
         {saving && (
