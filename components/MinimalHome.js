@@ -5,7 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { canGoBackInApp } from "../lib/backNav";
-import { fetchDetections, fetchBirdImages } from "../lib/queries";
+import { fetchDetections, fetchBirdImages, getRemoteAudioUrl } from "../lib/queries";
+import { forgetSpectrogram } from "../lib/spectrogram3dData";
 import { useLoginState } from "../lib/useLoginState";
 import { signOut } from "../lib/auth";
 import LoginPanel from "./LoginPanel";
@@ -18,7 +19,7 @@ import {
 } from "../lib/speciesOrder";
 import MinimalBirdModal from "./MinimalBirdModal";
 import OfflineSavePanel from "./OfflineSavePanel";
-import { isNativeApp, onUsingSavedChange } from "../lib/offline";
+import { isNativeApp, onUsingSavedChange, refreshEditedAudio } from "../lib/offline";
 
 const CONFIDENCE_DEFAULT = 60;
 
@@ -87,6 +88,15 @@ function MinimalHomeInner({ promptLogin = false }) {
   useEffect(() => {
     setIsApp(isNativeApp());
     return onUsingSavedChange(setUsingSaved);
+  }, []);
+
+  // 🔥 アプリを開いたとき：編集して公開した録音を、編集し直したものがあれば、保存済みのコピーを新しいものに入れ替える
+  //    （そのままだと、編集前の音が出続ける）。電波が無いときは、何もしない
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    refreshEditedAudio({ getRemoteAudioUrl })
+      .then((names) => names.forEach(forgetSpectrogram))
+      .catch((err) => console.warn(err));
   }, []);
 
   // 🔥 「タイトルを、画面の縦センターから15%上（＝上から35%）の位置に最優先で固定する」を、

@@ -14,6 +14,9 @@ import {
 } from "../lib/audioEdits";
 import { analyzeMp3Files } from "../lib/analyzerClient";
 import { runImport } from "../lib/importData";
+import { refreshEditedAudio } from "../lib/offline";
+import { getRemoteAudioUrl } from "../lib/queries";
+import { forgetSpectrogram } from "../lib/spectrogram3dData";
 
 const cardClass = "bg-white border-[3px] border-cardBorder rounded-2xl p-4";
 const inputClass =
@@ -242,6 +245,9 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
         );
       }
       setPublishResult({ count: records.length, before: res.before, after: res.after });
+      // 編集し直して公開したとき、この端末（アプリ）に保存してある古い音を、新しいものに入れ替える（アプリ以外では、何もしない）
+      forgetSpectrogram(name);
+      refreshEditedAudio({ names: [name], getRemoteAudioUrl }).catch((err) => console.warn(err));
       onPublished?.(sel.id, name);
     } catch (err) {
       console.error(err);
