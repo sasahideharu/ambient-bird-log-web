@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchSpeciesDetail } from "../lib/speciesDetail";
 import { getAudioUrl } from "../lib/queries";
-import MinimalSpectrogram from "./MinimalSpectrogram";
+import MinimalSpectrogramToggle from "./MinimalSpectrogramToggle";
 import VerifyControl from "./VerifyControl";
 import { useLoginState } from "../lib/useLoginState";
 
@@ -135,7 +135,7 @@ export default function MinimalBirdModal({ speciesName, onClose, onChanged }) {
                         {caption}
                       </div>
                     )}
-                    <MinimalSpectrogram
+                    <MinimalSpectrogramToggle
                       src={getAudioUrl(r.wavFilename)}
                       startSec={r.startSec}
                       endSec={r.endSec}

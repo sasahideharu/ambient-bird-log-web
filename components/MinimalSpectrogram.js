@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { computeSpectrogram, drawSpectrogram } from "../lib/spectrogram";
 
 // 秒数を「0:03」のような表示に変換する
@@ -34,6 +34,12 @@ export default function MinimalSpectrogram({ src, startSec, endSec }) {
       playheadT,
       showLabels: true,
     });
+  }, []);
+
+  // 2D ⇄ 3D の切り替えでこの部品が消えるとき、鳴っている音を止める
+  useLayoutEffect(() => {
+    const audio = audioRef.current;
+    return () => audio?.pause();
   }, []);
 
   useEffect(() => {

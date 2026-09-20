@@ -1,59 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { computeSpectrogram, normalizeFrames } from "../lib/spectrogram";
 import { createViewer } from "../lib/spectrogram3d";
-
-const MAX_FREQ_HZ = 13500; // スペクトログラムの上限（AudioSpectrogramCard・AudioEditor と同じ）
-const MIN_SAMPLES = 4096; // これより短いと、3D にできない
-
-// 録音（の指定した範囲）を読み込んで、左右それぞれのスペクトログラム（時間×周波数・0〜1）にする。
-// カード・編集画面と同じ計算（左右に、共通の明るさの基準）。時間の細かさは、画面の細かさに見合う約320列にする
-async function loadSpectrogram(src, startSec, endSec) {
-  const res = await fetch(src);
-  if (!res.ok) throw new Error(`音声を取得できませんでした（${res.status}）`);
-  const bytes = await res.arrayBuffer();
-  // 読み込み（デコード）だけに使う。本物の AudioContext は、iPhone の音の出方（消音スイッチ）に影響するため、使わない
-  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const buf = await new Promise((resolve, reject) => new Offline(1, 1, 48000).decodeAudioData(bytes, resolve, reject));
-  const sr = buf.sampleRate;
-  const total = buf.length;
-  const s = Math.min(Math.max(0, Math.floor((startSec ?? 0) * sr)), total - 1);
-  const e = Math.min(total, Math.max(s + 1, Math.floor((endSec ?? buf.duration) * sr)));
-  const n = e - s;
-  if (n < MIN_SAMPLES) throw new Error("範囲が短すぎて、3Dにできません");
-
-  const channelCount = Math.min(2, buf.numberOfChannels);
-  const chans = [];
-  for (let c = 0; c < channelCount; c++) chans.push(buf.getChannelData(c).slice(s, e));
-
-  let hop = Math.max(256, Math.ceil(n / 320 / 64) * 64);
-  let fftSize = hop > 4096 ? 8192 : hop > 2048 ? 4096 : 2048; // 時間の間隔（hop）が長いときは、窓も長くして、音を取りこぼさない
-  if (n < fftSize + hop * 8) {
-    fftSize = 2048;
-    hop = Math.max(64, Math.floor((n - fftSize) / 8));
-  }
-  const specs = chans.map((ch) => computeSpectrogram(ch, { fftSize, hop, bins: 128, sampleRate: sr, maxFreqHz: MAX_FREQ_HZ }));
-  const sharedMaxDb = Math.max(...specs.map((sp) => sp.maxDb));
-  const perChannel = specs.map((sp) => normalizeFrames(sp.rawFrames, sharedMaxDb));
-  const T = perChannel[0].length;
-  const B = perChannel[0][0].length;
-  const flat = (rows) => {
-    const a = new Float32Array(T * B);
-    rows.forEach((row, t) => a.set(row, t * B));
-    return a;
-  };
-  const left = flat(perChannel[0]);
-  return {
-    left,
-    right: channelCount === 2 ? flat(perChannel[1]) : left, // モノラルは、左右を同じにする
-    frames: T,
-    bins: B,
-    duration: n / sr,
-    topHz: specs[0].topHz,
-    channels: channelCount,
-  };
-}
+import { loadSpectrogram } from "../lib/spectrogram3dData"; // 録音を読み込んで、左右のスペクトログラムにする（「大きく見る」の元の画面と共通）
 
 const VIEW_BUTTONS = [
   { id: "iso", label: "ななめ" },
