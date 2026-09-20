@@ -63,7 +63,7 @@ function EditInner() {
                 </p>
               </div>
             )}
-            {(name || localFile) && <AudioEditor src={src} file={name ? null : localFile} initialRange={initialRange} />}
+            {(name || localFile) && <AudioEditor src={src} file={name ? null : localFile} initialRange={initialRange} sourceName={name} />}
           </div>
         )}
       </div>

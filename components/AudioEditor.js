@@ -19,6 +19,7 @@ import {
   percentFromSteep,
 } from "../lib/audioFocus";
 import { encodeWav } from "../lib/wav";
+import { listEdits, saveEdit, deleteEdit, rowToSelection, editKey } from "../lib/audioEdits";
 
 const MAX_FREQ_HZ = 13500; // スペクトログラムの上限（AudioSpectrogramCard と同じ）
 const CANVAS_H = 300;
@@ -148,8 +149,9 @@ function drawHandles(g, x0, y0, x1, y1, hl, coarse) {
 // 🔥 音声の編集（フォーカス）画面の中身。スペクトログラムで範囲（時間×周波数）を選び、外側の音を下げて、聞き比べる。
 //    ・src（URL）か file（選んだファイル）から読み込む
 //    ・initialRange：{ start, end }（秒）… 最初に選んでおく時間の範囲（鳥の詳細の「編集する」から来たとき）
-//    ・範囲は、いくつでも作れる（抽出1、抽出2 …）
-export default function AudioEditor({ src = null, file = null, initialRange = null }) {
+//    ・範囲は、いくつでも作れる。保存すると、連番（抽出1、抽出2 …）が付く
+//    ・sourceName：元の録音の名前（bird-wav のファイル名）。あると、範囲の設定を、保存・読み込みできる（自分だけに見える）
+export default function AudioEditor({ src = null, file = null, initialRange = null, sourceName = null }) {
   const [status, setStatus] = useState("loading"); // loading | ready | error
   const [errorMsg, setErrorMsg] = useState(null);
   const [duration, setDuration] = useState(0);
@@ -161,6 +163,8 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   const [loop, setLoop] = useState(false);
   const [playing, setPlaying] = useState(null); // { kind, id }
   const [busy, setBusy] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveMessage, setSaveMessage] = useState(null); // { ok, text }
   const [playError, setPlayError] = useState(null);
   const [channelView, setChannelView] = useState("LR"); // ステレオの表示（「左」「右」の2つのスイッチ）：LR＝両方オン（色分けして重ねる）／L＝左だけ／R＝右だけ
   const [hover, setHover] = useState(null); // マウスを乗せている部分 { id, type, hx, hy, handle }
@@ -241,14 +245,30 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
         framesChRef.current = perChannel;
         setTopHz(top);
         setDuration(buf.duration);
+        // 保存してある範囲（この録音の、自分の設定）
+        const loaded = [];
+        if (sourceName) {
+          try {
+            const rows = await listEdits(sourceName);
+            for (const row of rows) loaded.push(rowToSelection(row, nextIdRef.current++));
+            if (rows.length > 0) setNormalize(rows[0].settings?.normalize ?? true);
+          } catch (err) {
+            console.error(err);
+            setSaveMessage({ ok: false, text: "保存済みの範囲を読み込めませんでした（通信やログインを確認してください）。" });
+          }
+        }
+        let activeNew = null;
+        // 鳥の詳細の「編集する」から来たときは、その記録の時間の範囲を、新しい範囲として、選んでおく
         if (initialRange && initialRange.end > initialRange.start) {
           const t0 = clamp(initialRange.start, 0, buf.duration - MIN_DURATION);
           const t1 = clamp(initialRange.end, t0 + MIN_DURATION, buf.duration);
           const band = suggestBand(frames, top, buf.duration, t0, t1);
           const id = nextIdRef.current++;
-          setSelections([{ id, t0, t1, ...band, ...DEFAULT_FOCUS }]);
-          setActiveId(id);
+          activeNew = { id, dbId: null, seq: null, savedKey: null, t0, t1, ...band, ...DEFAULT_FOCUS };
         }
+        if (cancelled) return;
+        setSelections(activeNew ? [...loaded, activeNew] : loaded);
+        setActiveId(activeNew ? activeNew.id : loaded[0]?.id ?? null);
         setStatus("ready");
       } catch (err) {
         console.error(err);
@@ -263,7 +283,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, file]);
+  }, [src, file, sourceName]);
 
   // 後片付け（再生を止める）
   useEffect(
@@ -330,7 +350,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
       g.strokeRect(x0, y0, x1 - x0, y1 - y0);
       g.fillStyle = "#B8E6EE";
       g.font = "bold 11px sans-serif";
-      g.fillText(String(s.id), x0 + 4, y0 + 13);
+      g.fillText(s.seq ? String(s.seq) : "＊", x0 + 4, y0 + 13);
       const hl = drag && drag.id === s.id ? drag : hover && hover.id === s.id ? hover : null;
       if (hl && hl.type === "move") {
         // 範囲ごと移動：範囲の全体を、黄色の点線で強調する
@@ -540,7 +560,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
         setDrag({ id, type: "create" });
         setSelections((prev) => [
           ...prev,
-          { id, t0: 0, t1: MIN_DURATION, fLo: 0, fHi: MIN_BAND, ...DEFAULT_FOCUS },
+          { id, dbId: null, seq: null, savedKey: null, t0: 0, t1: MIN_DURATION, fLo: 0, fHi: MIN_BAND, ...DEFAULT_FOCUS },
         ]);
         setActiveId(id);
       }
@@ -658,6 +678,49 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
     playRef.current = { kind, t0, loop: el.loop };
     setPlaying({ kind, id: s?.id ?? null });
     rafRef.current = requestAnimationFrame(tick);
+  }
+
+  // 範囲の名前：保存すると、連番（抽出1、2…）。まだ保存していないものは、「新しい範囲」
+  const labelOf = (sel) => (sel.seq ? `抽出${sel.seq}` : "新しい範囲");
+  const isDirty = (sel) => sel.savedKey == null || sel.savedKey !== editKey(sel, normalize);
+
+  async function handleSave() {
+    if (!active || !sourceName) return;
+    setSaveBusy(true);
+    setSaveMessage(null);
+    try {
+      const row = await saveEdit({ sourceName, sel: active, normalize });
+      const saved = rowToSelection(row, active.id);
+      updateSelection(active.id, { dbId: saved.dbId, seq: saved.seq, savedKey: editKey(active, normalize) });
+      setSaveMessage({ ok: true, text: `保存しました（抽出${row.seq}）。自分だけに見えます。` });
+    } catch (err) {
+      console.error(err);
+      setSaveMessage({
+        ok: false,
+        text: `保存できませんでした（${err?.message ?? err}）。ログインの状態や通信を確認して、もう一度お試しください。`,
+      });
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
+  async function handleDelete(sel) {
+    if (sel.dbId) {
+      if (sel.published) return;
+      if (!window.confirm(`「${labelOf(sel)}」を消します。保存してある設定も、消えます。よいですか？`)) return;
+      setSaveBusy(true);
+      setSaveMessage(null);
+      try {
+        await deleteEdit(sel.dbId);
+      } catch (err) {
+        console.error(err);
+        setSaveMessage({ ok: false, text: `消せませんでした（${err?.message ?? err}）` });
+        setSaveBusy(false);
+        return;
+      }
+      setSaveBusy(false);
+    }
+    removeSelection(sel.id);
   }
 
   function removeSelection(id) {
@@ -784,7 +847,8 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
                   s.id === activeId ? "border-accentText bg-white text-ink" : "border-cardBorder bg-page text-inkMuted"
                 }`}
               >
-                抽出{s.id}
+                {labelOf(s)}
+                {s.published ? " 🔒" : isDirty(s) ? " ●" : ""}
               </button>
             ))}
           </div>
@@ -794,11 +858,38 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
       {status === "ready" && active && (
         <div className={cardClass}>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-xs font-bold text-ink">抽出{active.id}</div>
-            <button onClick={() => removeSelection(active.id)} className="text-[11px] font-bold text-red-500 underline underline-offset-2">
+            <div className="text-xs font-bold text-ink">{labelOf(active)}</div>
+            <button
+              onClick={() => handleDelete(active)}
+              disabled={saveBusy || active.published}
+              className="text-[11px] font-bold text-red-500 underline underline-offset-2 disabled:opacity-40"
+            >
               この範囲を消す
             </button>
           </div>
+          <div className="mb-2 flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleSave}
+              disabled={!sourceName || saveBusy || active.published || !isDirty(active)}
+              className={`${btnClass} !bg-white`}
+            >
+              {saveBusy ? "保存中…" : "💾 設定を保存"}
+            </button>
+            <span className="text-[10px] text-inkMuted">
+              {!sourceName
+                ? "（ファイルを選んで開いたときは、保存できません）"
+                : active.published
+                  ? "公開済み（直せません）"
+                  : active.dbId == null
+                    ? "未保存"
+                    : isDirty(active)
+                      ? "保存済み（変更あり・まだ保存していません）"
+                      : `保存済み（抽出${active.seq}・自分だけに見えます）`}
+            </span>
+          </div>
+          {saveMessage && (
+            <p className={`mb-2 text-[11px] leading-relaxed ${saveMessage.ok ? "text-[#3F6C74]" : "text-red-500"}`}>{saveMessage.text}</p>
+          )}
 
           <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-inkMuted">
             <label>
@@ -974,7 +1065,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
           </label>
 
           <p className="mt-3 text-[10px] text-inkMuted leading-relaxed">
-            ※ いまは、聞いて調整するところまでです。保存と、加工した音の書き出し（再解析）は、次の段階で追加します。
+            ※ 範囲と下げ方の設定は、保存できます（自分だけに見えます。保存した範囲は、次に開いたときにも出ます）。加工した音の書き出し（再解析・公開）は、次の段階で追加します。
           </p>
         </div>
       )}
