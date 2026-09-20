@@ -2,11 +2,13 @@
 
 import { Suspense, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { notFound, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { fetchLocationDetail } from "../../lib/locationDetail";
 import { getAudioUrl } from "../../lib/queries";
 import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
 import { useSystemBars } from "../../lib/useSystemBars";
+import { useLoginState } from "../../lib/useLoginState";
+import VerifyControl from "../../components/VerifyControl";
 import dynamic from "next/dynamic";
 
 // 🔥 Leafletはブラウザ専用のためSSRを無効化して読み込む
@@ -28,15 +30,19 @@ function LocationDetailInner() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [minConfidence, setMinConfidence] = useState(50);
+  const login = useLoginState();
+  const [reloadKey, setReloadKey] = useState(0); // 確認（修正・確定）を保存したあとに、読み込み直す
 
   useEffect(() => {
     async function load() {
       try {
         const result = await fetchLocationDetail(locationName);
         if (!result) {
-          notFound();
+          setLoc(null);
+          setLoadError("この地点の記録は見つかりませんでした。");
           return;
         }
+        setLoadError(null);
         setLoc(result);
       } catch (err) {
         console.error(err);
@@ -46,7 +52,7 @@ function LocationDetailInner() {
       }
     }
     load();
-  }, [locationName]);
+  }, [locationName, reloadKey]);
 
   const visibleRecords = useMemo(() => {
     if (!loc) return [];
@@ -121,7 +127,13 @@ function LocationDetailInner() {
                       <div className="text-[10px] tracking-wide text-accentText font-black">
                         {r.species}
                       </div>
-                      <div className="text-[11px] text-[#3F6C74] font-bold">識別信頼度 {r.confidence}%</div>
+                      <div className="text-[11px] text-[#3F6C74] font-bold">
+                        {r.verification
+                          ? r.verification.status === "confirmed"
+                            ? "確定"
+                            : "修正済み"
+                          : `識別信頼度 ${r.confidence}%`}
+                      </div>
                     </div>
                     <AudioSpectrogramCard src={audioUrl} startSec={r.startSec} endSec={r.endSec} />
                     <div className="flex gap-1.5 mt-2">
@@ -131,6 +143,13 @@ function LocationDetailInner() {
                       <span className="text-[10px] font-bold bg-page border-2 border-cardBorder rounded-lg px-2 py-1">
                         🕒 {r.time}
                       </span>
+                    </div>
+                    <div className="mt-2">
+                      <VerifyControl
+                        record={r}
+                        loggedIn={login.loggedIn}
+                        onSaved={() => setReloadKey((k) => k + 1)}
+                      />
                     </div>
                   </div>
                 );

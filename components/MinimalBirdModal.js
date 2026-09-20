@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchSpeciesDetail } from "../lib/speciesDetail";
 import { getAudioUrl } from "../lib/queries";
 import MinimalSpectrogram from "./MinimalSpectrogram";
+import VerifyControl from "./VerifyControl";
+import { useLoginState } from "../lib/useLoginState";
 
 const CONFIDENCE_DEFAULT = 60;
 
@@ -15,7 +17,8 @@ function formatMonthYear(isoDate) {
   return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-export default function MinimalBirdModal({ speciesName, onClose }) {
+export default function MinimalBirdModal({ speciesName, onClose, onChanged }) {
+  const login = useLoginState();
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [visible, setVisible] = useState(false);
@@ -42,6 +45,16 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
       clearTimeout(t);
     };
   }, [speciesName]);
+
+  // 確認（修正・確定）を保存したあとに、この鳥の記録を読み込み直す（ウィンドウは閉じない）。
+  // 別の鳥に修正した記録は、この一覧から消える。ホームの一覧も更新する
+  const refresh = useCallback(() => {
+    if (!speciesName) return;
+    fetchSpeciesDetail(speciesName)
+      .then(setDetail)
+      .catch((err) => console.error(err));
+    onChanged?.();
+  }, [speciesName, onChanged]);
 
   if (!speciesName) return null;
 
@@ -85,6 +98,10 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
           <p className="text-white/50 text-xs text-center py-16">…</p>
         )}
 
+        {!loading && !detail && (
+          <p className="text-white/50 text-xs text-center py-16">この鳥の記録はありません</p>
+        )}
+
         {!loading && detail && (
           <div className="w-full h-full flex flex-col">
             {/* 固定ヘッダー：学名・和名・画像はスクロールしない */}
@@ -123,6 +140,9 @@ export default function MinimalBirdModal({ speciesName, onClose }) {
                       startSec={r.startSec}
                       endSec={r.endSec}
                     />
+                    <div className="mt-2">
+                      <VerifyControl record={r} loggedIn={login.loggedIn} onSaved={refresh} tone="dark" />
+                    </div>
                   </div>
                 );
               })}

@@ -11,6 +11,7 @@ import {
 } from "../lib/speciesOrder";
 import dynamic from "next/dynamic";
 import { useSystemBars } from "../lib/useSystemBars";
+import { countRejectedRemote } from "../lib/verifications";
 
 // 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む
 const LocationMap = dynamic(() => import("./LocationMap"), {
@@ -72,6 +73,11 @@ export default function AdminHome() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [orderMap, setOrderMap] = useState(() => ({ ...getSessionOrderMap() }));
+  const [rejectedCount, setRejectedCount] = useState(0); // 除外した記録の件数（あるときだけ入口を出す）
+
+  useEffect(() => {
+    countRejectedRemote().then(setRejectedCount);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -295,6 +301,16 @@ export default function AdminHome() {
               <p className="text-center text-xs text-inkMuted py-6">観測記録がありません</p>
             )}
           </div>
+        )}
+
+        {rejectedCount > 0 && (
+          <Link
+            href="/rejected"
+            className="mx-4 mb-5 flex items-center justify-between rounded-2xl border-[3px] border-cardBorder bg-white px-4 py-3 text-xs font-bold text-[#3F6C74] hover:border-accent transition-colors"
+          >
+            <span>除外した記録（{rejectedCount}件）を見る</span>
+            <span className="text-accentText text-base">›</span>
+          </Link>
         )}
       </div>
     </div>

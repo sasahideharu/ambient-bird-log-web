@@ -2,11 +2,13 @@
 
 import { Suspense, useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { notFound, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { fetchSpeciesDetail } from "../../lib/speciesDetail";
 import { getAudioUrl } from "../../lib/queries";
 import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
 import { useSystemBars } from "../../lib/useSystemBars";
+import { useLoginState } from "../../lib/useLoginState";
+import VerifyControl from "../../components/VerifyControl";
 
 const PLACEHOLDER_COLOR = "#F6E1E4";
 const PLACEHOLDER_EMOJI = "🐦";
@@ -21,15 +23,19 @@ function BirdDetailInner() {
   const [loadError, setLoadError] = useState(null);
   const [minConfidence, setMinConfidence] = useState(50);
   const [imageExpanded, setImageExpanded] = useState(false);
+  const login = useLoginState();
+  const [reloadKey, setReloadKey] = useState(0); // 確認（修正・確定）を保存したあとに、読み込み直す
 
   useEffect(() => {
     async function load() {
       try {
         const result = await fetchSpeciesDetail(commonName);
         if (!result) {
-          notFound();
+          setBird(null);
+          setLoadError("この鳥の記録は見つかりませんでした。");
           return;
         }
+        setLoadError(null);
         setBird(result);
       } catch (err) {
         console.error(err);
@@ -39,7 +45,7 @@ function BirdDetailInner() {
       }
     }
     load();
-  }, [commonName]);
+  }, [commonName, reloadKey]);
 
   const visibleRecords = useMemo(() => {
     if (!bird) return [];
@@ -160,7 +166,13 @@ function BirdDetailInner() {
                       <div className="text-[10px] tracking-wide text-accentText font-black">
                         標本記録 No. {r.id}
                       </div>
-                      <div className="text-[11px] text-[#3F6C74] font-bold">識別信頼度 {r.confidence}%</div>
+                      <div className="text-[11px] text-[#3F6C74] font-bold">
+                        {r.verification
+                          ? r.verification.status === "confirmed"
+                            ? "確定"
+                            : "修正済み"
+                          : `識別信頼度 ${r.confidence}%`}
+                      </div>
                     </div>
                     <AudioSpectrogramCard src={audioUrl} startSec={r.startSec} endSec={r.endSec} />
                     <div className="flex gap-1.5 mt-2">
@@ -173,6 +185,13 @@ function BirdDetailInner() {
                       <span className="text-[10px] font-bold bg-page border-2 border-cardBorder rounded-lg px-2 py-1">
                         🕒 {r.time}
                       </span>
+                    </div>
+                    <div className="mt-2">
+                      <VerifyControl
+                        record={r}
+                        loggedIn={login.loggedIn}
+                        onSaved={() => setReloadKey((k) => k + 1)}
+                      />
                     </div>
                   </div>
                 );

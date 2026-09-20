@@ -329,6 +329,7 @@ export default function MinimalHome({ promptLogin = false }) {
       <MinimalBirdModal
         speciesName={selectedSpecies}
         onClose={() => setSelectedSpecies(null)}
+        onChanged={loadData}
       />
 
       {isApp && login.loggedIn && (
