@@ -11,6 +11,7 @@ import {
 import { searchPlaces } from "../lib/geocode";
 import { resetSpeciesChoices } from "../lib/verifications";
 import ServerAnalyzeSection from "./ServerAnalyzeSection";
+import RegisteredEditList from "./RegisteredEditList";
 
 // 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む（管理画面の地図と同じ）
 const LocationPicker = dynamic(() => import("./LocationPicker"), {
@@ -205,7 +206,13 @@ export default function ImportDataPanel() {
         location: { name: locName.trim(), latitude: latNum, longitude: lonNum },
         onProgress: setProgress,
       });
-      setResult(res);
+      // 登録した録音の一覧（登録後に、そこから編集できるようにする）
+      const byFile = new Map();
+      for (const r of preview?.records ?? []) {
+        if (!byFile.has(r.wav_filename)) byFile.set(r.wav_filename, []);
+        byFile.get(r.wav_filename).push(r);
+      }
+      setResult(res.ok ? { ...res, files: [...byFile].map(([name, rows]) => ({ name, rows })) } : res);
       if (res.ok) {
         setCsvFiles([]);
         setMp3Files([]);
@@ -459,6 +466,8 @@ export default function ImportDataPanel() {
             )}
           </div>
         )}
+
+        {result?.ok && <RegisteredEditList files={result.files} />}
         </>
       )}
     </div>

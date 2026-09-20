@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { uploadMp3Files, runImport, fetchExistingRecords, compareWithExisting } from "../lib/importData";
 import { analyzeMp3Files } from "../lib/analyzerClient";
+import RegisteredEditList from "./RegisteredEditList";
 
 const cardClass = "bg-white border-[3px] border-cardBorder rounded-2xl p-4";
 const inputClass =
@@ -111,7 +112,11 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
           analysis_params: analysis.meta.params,
         },
       });
-      setRegisterResult(res);
+      // 登録した録音の一覧（登録後に、そこから編集できるようにする）。記録が無かった録音は、場所が分からず、公開できないので入れない
+      const files = analysis.names
+        .map((name) => ({ name, rows: analysis.results[name]?.rows ?? [] }))
+        .filter((f) => f.rows.length > 0);
+      setRegisterResult(res.ok ? { ...res, files } : res);
       if (res.ok) {
         setMp3Files([]);
         setInputKey((k) => k + 1);
@@ -326,6 +331,8 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
           )}
         </div>
       )}
+
+      {registerResult?.ok && <RegisteredEditList files={registerResult.files} />}
     </>
   );
 }
