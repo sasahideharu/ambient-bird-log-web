@@ -40,6 +40,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
   const [exported, setExported] = useState(null); // { key, name, bytes, location }
   const [analysis, setAnalysis] = useState(null); // { key, results, meta, warnings, elapsedSec }
   const [publishResult, setPublishResult] = useState(null);
+  const [confirming, setConfirming] = useState(false); // 「本当に公開しますか？」の確認を出している
 
   const name = sel.seq ? exportedName(sourceName, sel.seq) : null; // 保存して連番が決まるまでは、名前も無い
   const currentKey = editKey(sel, normalize);
@@ -75,9 +76,11 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
   if (sel.published) {
     return (
       <div className={cardClass}>
-        <div className="text-xs font-bold text-[#3F6C74]">🔒 公開済み</div>
+        <div className="text-xs font-bold text-[#3F6C74]">{publishResult ? "✓ 公開しました" : "🔒 公開済み"}</div>
         <p className="mt-1 text-[11px] text-inkMuted leading-relaxed break-all">
-          {sel.exportedName ?? name} として公開しています。公開したものは、直したり、消したりできません。範囲や下げ方の設定は、自分だけに見えます。
+          {sel.exportedName ?? name} として公開しています。
+          {publishResult && `記録 ${publishResult.count}件を登録しました（合計 ${publishResult.before}件 → ${publishResult.after}件）。`}
+          公開したものは、直したり、消したりできません。範囲や下げ方の設定は、自分だけに見えます。
         </p>
       </div>
     );
@@ -87,6 +90,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
     setPhase("working");
     setError(null);
     setPublishResult(null);
+    setConfirming(false);
     try {
       let ex = exported && exported.key === currentKey ? exported : null;
       if (!ex) {
@@ -125,13 +129,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
 
   async function handlePublish() {
     if (!analysis || stale || records.length === 0 || !exported) return;
-    const ok = window.confirm(
-      `「抽出${sel.seq}」を公開します。\n\n` +
-        `・記録 ${records.length}件（鳥 ${speciesList.length}種）が、みんなに見えるようになります\n` +
-        `・公開したあとは、直したり、消したりできません（元の録音は、そのまま残ります）\n` +
-        `・範囲や下げ方の設定は、自分だけに見えます\n\nよいですか？`
-    );
-    if (!ok) return;
+    setConfirming(false);
     setPhase("publishing");
     setError(null);
     try {
@@ -261,13 +259,38 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
             </p>
           ) : (
             <>
-              <button
-                onClick={handlePublish}
-                disabled={busy || records.length === 0 || !!result?.error}
-                className="mt-4 w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-3 disabled:opacity-40"
-              >
-                {phase === "publishing" ? "公開中…" : `🚀 公開する（記録 ${records.length}件）`}
-              </button>
+              {confirming && !busy ? (
+                // 確認は、画面の中に出す（ブラウザの確認ダイアログは、出ない環境があるため）
+                <div className="mt-4 rounded-xl border-[3px] border-red-300 bg-red-50 p-3">
+                  <div className="text-xs font-bold text-red-500">本当に公開しますか？</div>
+                  <ul className="mt-1 list-disc pl-4 text-[11px] text-ink leading-relaxed">
+                    <li>
+                      「抽出{sel.seq}」の記録 {records.length}件（鳥 {speciesList.length}種）が、みんなに見えるようになります
+                    </li>
+                    <li>公開したあとは、直したり、消したりできません（元の録音は、そのまま残ります）</li>
+                    <li>範囲や下げ方の設定は、自分だけに見えます</li>
+                  </ul>
+                  <div className="mt-3 flex gap-2">
+                    <button onClick={handlePublish} className="flex-1 rounded-xl bg-red-500 text-white text-sm font-bold py-2.5">
+                      公開する（取り消せません）
+                    </button>
+                    <button
+                      onClick={() => setConfirming(false)}
+                      className="flex-1 rounded-xl border-2 border-cardBorder bg-white text-sm font-bold py-2.5 text-[#3F6C74]"
+                    >
+                      やめる
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirming(true)}
+                  disabled={busy || records.length === 0 || !!result?.error}
+                  className="mt-4 w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-3 disabled:opacity-40"
+                >
+                  {phase === "publishing" ? "公開中…" : `🚀 公開する（記録 ${records.length}件）`}
+                </button>
+              )}
               {phase === "publishing" && progress && <p className="mt-2 text-center text-[11px] text-inkMuted">{progress}</p>}
               <p className="mt-2 text-[10px] text-inkMuted leading-relaxed">
                 公開すると、記録は、ふつうの録音と同じように、みんなに見えて、集計にも数えられます（「編集（元：{sourceName.replace(/\.mp3$/, "")}）」の印が付きます）。公開したあとは、直したり、消したりできません。
