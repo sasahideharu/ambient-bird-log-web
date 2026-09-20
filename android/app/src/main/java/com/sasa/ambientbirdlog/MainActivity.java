@@ -1,4 +1,4 @@
-package com.ambientbirdlog.app;
+package com.sasa.ambientbirdlog;
 
 import android.os.Bundle;
 import android.webkit.WebView;

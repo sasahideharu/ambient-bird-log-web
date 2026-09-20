@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.ambientbirdlog.app"
+    namespace = "com.sasa.ambientbirdlog"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.ambientbirdlog.app"
+        applicationId "com.sasa.ambientbirdlog"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
