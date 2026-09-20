@@ -8,6 +8,7 @@ import {
   resetSpeciesChoices,
   VERIFY_METHODS,
 } from "../lib/verifications";
+import PerchOpinion from "./PerchOpinion";
 
 const OPTIONS = [
   { value: "confirmed", title: "合っている（確定）", hint: "この鳥で間違いない。信頼度の代わりに「確定」と表示します" },
@@ -123,6 +124,14 @@ export default function VerifyPanel({ open, record, onClose, onSaved }) {
         <p className="mt-2 text-center text-[11px] text-white/60 leading-relaxed">
           BirdNET の判定：{record.originalCommonName}（信頼度 {record.originalConfidence}%）
         </p>
+
+        <PerchOpinion
+          wavFilename={record.wavFilename}
+          startSec={record.startSec}
+          endSec={record.endSec}
+          scientificName={record.originalScientificName}
+          commonName={record.originalCommonName}
+        />
 
         <div className="mt-5 flex flex-col gap-2">
           {OPTIONS.map((o) => (

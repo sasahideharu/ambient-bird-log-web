@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useLoginState } from "../lib/useLoginState";
 import ImportDataPanel from "./ImportDataPanel";
 import ImportImagePanel from "./ImportImagePanel";
+import PerchBackfillPanel from "./PerchBackfillPanel";
 
 // 🔥 データ登録の中身（管理者だけ）。管理画面の「データ登録」タブと、/import の両方で使う。
 //    書き込みは、データベース側で「管理者名簿にいる人だけ」に制限している。
@@ -62,8 +63,11 @@ export default function ImportSection() {
             <button onClick={() => setMode("image")} className={pillClass(mode === "image")}>
               📷 鳥の写真
             </button>
+            <button onClick={() => setMode("perch")} className={pillClass(mode === "perch")}>
+              🔍 Perch
+            </button>
           </div>
-          {mode === "data" ? <ImportDataPanel /> : <ImportImagePanel />}
+          {mode === "data" ? <ImportDataPanel /> : mode === "image" ? <ImportImagePanel /> : <PerchBackfillPanel />}
         </>
       )}
     </div>

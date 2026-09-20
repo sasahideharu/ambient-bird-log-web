@@ -5,6 +5,7 @@ import { uploadMp3Files, runImport, fetchExistingRecords, compareWithExisting } 
 import { analyzeMp3Files } from "../lib/analyzerClient";
 import { prepareWav, isWavName } from "../lib/wavPrepare";
 import { uploadAnalysisWavs, deleteAnalysisWavs } from "../lib/analysisWav";
+import { opinionRows, saveOpinions, judge } from "../lib/modelOpinions";
 import RegisteredEditList from "./RegisteredEditList";
 
 const cardClass = "bg-white border-[3px] border-cardBorder rounded-2xl p-4";
@@ -31,6 +32,24 @@ const STAGE_LABEL = {
 };
 
 const mb = (bytes) => (bytes / 1048576).toFixed(1);
+const PERCH_STRONG_LOGIT = 8; // Perch の点数（logit）：これ以上なら「強く言っている」（確かな検出は 9〜12・雑音は 4〜7 の目安）
+
+// 1本の結果について、Perch の意見のまとめ：BirdNET の記録が Perch の上位にもいる数・Perch だけが強く言う鳥
+function perchSummary(res) {
+  const windows = res.perch?.windows;
+  if (!windows || windows.length === 0) return null;
+  let same = 0;
+  for (const r of res.rows) if (judge(r.scientific_name, windows, r.start_sec, r.end_sec).status === "same") same++;
+  const only = new Map(); // 名前 → 一番高い点数
+  for (const w of windows) {
+    const t = w.top[0];
+    if (!t || t.logit < PERCH_STRONG_LOGIT) continue;
+    if (res.rows.some((r) => r.scientific_name === t.sci && r.end_sec > w.t0 && r.start_sec < w.t1)) continue;
+    const label = t.common ?? t.sci;
+    only.set(label, Math.max(only.get(label) ?? 0, t.logit));
+  }
+  return { total: res.rows.length, same, only: [...only.entries()].sort((a, b) => b[1] - a[1]) };
+}
 const inputLabel = (kind) => (kind === "wav" ? "wav-48k-16bit" : "mp3"); // 解析した音の種類（記録の analysis_params に残す）
 
 // 🔥 「サーバーで解析」（管理者だけ）。MP3 か WAV を選ぶと、サーバー（BirdNET）が解析して、結果を返す。
@@ -48,6 +67,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
   const [minConf, setMinConf] = useState("0.25");
   const [useFilter, setUseFilter] = useState(true); // 場所＋時期で、鳥を絞り込む（標準：オン）
   const [stereoBest, setStereoBest] = useState(true); // ステレオは、左右も別々に解析して、強い方を採る（標準：オン）
+  const [usePerch, setUsePerch] = useState(true); // 別のモデル Perch も解析して、「別モデルの意見」を残す（標準：オン。場所＋時期の絞り込みが要る）
 
   const [phase, setPhase] = useState("idle"); // idle | working | analyzed | registering
   const [progress, setProgress] = useState(null);
@@ -60,7 +80,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
   useEffect(() => {
     setAnalysis(null);
     setError(null);
-  }, [items, minConf, useFilter, stereoBest, location.latitude, location.longitude]);
+  }, [items, minConf, useFilter, stereoBest, usePerch, location.latitude, location.longitude]);
 
   const invalidNames = useMemo(() => items.map((i) => i.name).filter((n) => !VALID_MP3_NAME.test(n)), [items]);
   const duplicateNames = useMemo(() => {
@@ -161,6 +181,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
         location: useFilter ? { lat: location.latitude, lon: location.longitude } : null,
         useWeek: useFilter,
         stereo: stereoBest ? "best" : "mix",
+        perch: usePerch && useFilter, // Perch は、場所＋時期の種の一覧で絞らないと、日本にいない鳥が上位に出てしまう
         onProgress: setProgress,
       });
       // 結果の名前を、登録する MP3 の名前に直す（WAV の結果は、同じ名前の MP3 の記録として登録する）
@@ -173,7 +194,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
       const names = items.map((i) => i.name);
       const inputs = Object.fromEntries(items.map((i) => [i.name, inputLabel(i.kind)]));
       const existing = await fetchExistingRecords(names);
-      setAnalysis({ ...a, results, warnings, inputs, compare: compareWithExisting(results, existing), names });
+      setAnalysis({ ...a, results, warnings, inputs, compare: compareWithExisting(results, existing), names, perchOn: !!a.meta?.perch });
     } catch (err) {
       console.error(err);
       setError(err?.message ?? String(err));
@@ -214,7 +235,17 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
       const files = analysis.names
         .map((name) => ({ name, rows: analysis.results[name]?.rows ?? [] }))
         .filter((f) => f.rows.length > 0);
-      setRegisterResult(res.ok ? { ...res, files } : res);
+      // Perch の意見を、保存する（記録の登録が済んだあと。失敗しても、記録の登録は、そのまま有効）
+      let opinions = null;
+      if (res.ok && analysis.perchOn) {
+        try {
+          opinions = { saved: await saveOpinions(opinionRows(analysis.results, analysis.meta)) };
+        } catch (err) {
+          console.error(err);
+          opinions = { error: err?.message ?? String(err) };
+        }
+      }
+      setRegisterResult(res.ok ? { ...res, files, opinions } : res);
       if (res.ok) {
         setItems([]);
         setInputKey((k) => k + 1);
@@ -326,6 +357,23 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
           </span>
         </label>
 
+        <label className="mt-3 flex items-start gap-2 text-[11px] text-ink leading-relaxed">
+          <input
+            type="checkbox"
+            checked={usePerch && useFilter}
+            onChange={(e) => setUsePerch(e.target.checked)}
+            disabled={busy || !useFilter}
+            className="mt-0.5"
+          />
+          <span>
+            <b>Perch も解析して、「別モデルの意見」を残す</b>（標準：オン）
+            <br />
+            <span className="text-inkMuted">
+              別のモデル（Google の Perch 2.0）が、5秒ごとに、上位の鳥を出します。登録と一緒に保存して、確認画面（管理者だけ）で、BirdNET の判定と見比べられます。「場所と時期で絞り込む」がオンのときだけ使えます。
+            </span>
+          </span>
+        </label>
+
         <button
           onClick={handleAnalyze}
           disabled={!canAnalyze}
@@ -389,6 +437,19 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
                       ステレオ（左右も別々に解析）：混ぜた音だけの場合より、増えた・高くなった記録 {res.stereo.gained_vs_mix}件
                     </div>
                   )}
+                  {(() => {
+                    const ps = perchSummary(res);
+                    if (!ps) return res.perch?.error ? <div className="text-red-500">Perch：{res.perch.error}</div> : null;
+                    return (
+                      <div>
+                        Perch：
+                        {ps.total > 0 ? `BirdNET の記録 ${ps.total}件のうち ${ps.same}件が、Perch の上位にもいます` : "BirdNET の記録は、ありません"}
+                        {ps.only.length > 0
+                          ? `／Perch だけが強く言う鳥：${ps.only.slice(0, 3).map(([n, v]) => `${n}（${v.toFixed(1)}）`).join("、")}`
+                          : ""}
+                      </div>
+                    );
+                  })()}
                   <div>
                     {c && c.existingTotal > 0
                       ? `既存 ${c.existingTotal}件：同じ ${c.same}・値が変わる ${c.changed}・新しく増える ${c.new}${
@@ -445,6 +506,14 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
                 {registerResult.after - registerResult.before}件、残り{" "}
                 {Math.max(0, registerResult.recordsSent - (registerResult.after - registerResult.before))}件は、同じ記録の上書きです）。
               </p>
+              {registerResult.opinions?.saved != null && (
+                <p className="mt-1 text-[11px] text-inkMuted leading-relaxed">Perch の意見 {registerResult.opinions.saved}行を保存しました（管理者だけに見えます）。</p>
+              )}
+              {registerResult.opinions?.error && (
+                <p className="mt-1 text-[11px] text-red-500 leading-relaxed break-all">
+                  ⚠ Perch の意見を保存できませんでした（{registerResult.opinions.error}）。記録の登録は、済んでいます。管理画面の「Perch」で、あとからかけられます。
+                </p>
+              )}
             </>
           ) : (
             <>

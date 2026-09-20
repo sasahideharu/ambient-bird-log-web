@@ -1,6 +1,7 @@
 # 解析サーバー（Modal）
 
 BirdNET で MP3・WAV を解析して、結果（3秒ごとの記録）を返すサーバーです。データ登録画面の「サーバーで解析」から呼ばれます。
+別のモデル Perch 2.0 も動かせます（「別モデルの意見」用。下の「Perch」を参照）。
 
 ## しくみ
 
@@ -46,6 +47,24 @@ Mac の BirdNET の画面＋CSV で解析していた、いまの記録と、同
 
 **WAV 経由（画面で 48kHz・16bit に変換した WAV を解析）のほうが、Mac の結果に近い**（2026-09-20・9月5日の森戸川源流・ステレオ13本・場所＋時期・下限0.25・ステレオは混ぜた音）：記録は、Mac の CSV と同じ6件（同じ鳥・同じ区間・過不足なし）。信頼度の差（Mac との差の平均／最大）：WAV 経由＝0.012／0.044、MP3 経由＝0.041／0.091（6行での比較）。
 
+## Perch（別モデルの意見）
+
+Google の Perch 2.0（Apache-2.0＝営利でも使える）を、BirdNET と別に動かして、5秒ごとの上位5種を返します（`perch: true`）。確認画面（管理者だけ）で、BirdNET の判定と見比べるために使います。
+
+| 項目 | 内容 |
+|---|---|
+| モデル | 公式の perch_v2_cpu（Kaggle：google/bird-vocalization-classifier/tensorFlow2/perch_v2_cpu）。TensorFlow の SavedModel。画像のビルドで、中に入れてある（約390MB） |
+| 入力 | 32kHz・5秒ごと（左右は混ぜる）。最後の区間は、無音で埋める |
+| 出力 | 14,795クラスの点数（logit）。**確率としては補正されていない**。確かな検出は 9〜12・雑音は 4〜7 の目安。区間ごとに、上位5種（学名・日本語名・logit・確率）を返す |
+| 場所・時期の絞り込み | **Perch には無い**ので、BirdNET と同じ「その場所・その時期の種の一覧」（基準 0.03）で絞って、そのなかでの上位を返す。**場所を渡さないと、日本にいない鳥が上位に出るので、意味がない**（画面は、場所＋時期の絞り込みがオンのときだけ Perch を使う） |
+| 名前の対応 | 学名は、BirdNET の表記に直す。Perch は Parus minor（シジュウカラ）を持たず、Parus major／cinereus に入れているので、対応表（`BIRDNET_TO_PERCH`）で吸収する。日本語名は、BirdNET のラベル（ja）から。種の一覧の約95%が対応（対応しない13種は、猛禽・シギ・チドリ・サギの仲間） |
+| 速さ | 1区間 約0.18秒（4CPU）。モデルの読み込み 約3.5秒 |
+| 使い方 | `{"files": [...], "location": {"lat", "lon"}, "perch": true}`。`"birdnet": false` にすると、BirdNET を動かさない（Perch だけ） |
+
+試作（2026-09-20・9か所の39本）：BirdNET の記録（信頼度0.25以上）135件のうち、Perch の上位5に同じ鳥が入った割合＝88%（シジュウカラの名前の対応を直すと約94%）。BirdNET の信頼度が高いほど、よく合う（0.8以上で、1位が81%）。Perch が強く言い切った（確率0.6以上）71区間のうち、80%は BirdNET も同じ鳥。残りは、Perch だけが言う鳥（見落とし候補にも、誤検出にもなりうる）。
+
+結果は、画面が、データベースの表 model_opinions（管理者だけが読める・書ける）に保存する。サーバーは、書き込まない。
+
 ## 公開・停止・試験
 
 すべて、リポジトリのルートで実行します（Python の環境は `server/.venv`。Git には入れません）。
@@ -63,6 +82,7 @@ server/.venv/bin/python -m modal app stop ambient-bird-log-analyzer
 
 # 試験（何も書き込まない。既存の MP3 を解析して、結果をファイルに保存）
 server/.venv/bin/python -m modal run server/analyzer_app.py::selftest
+server/.venv/bin/python -m modal run server/analyzer_app.py::perch_selftest   # Perch（画像のビルドがあるので、初回は数分）
 ```
 
 入口の URL：`https://sasahideharu--ambient-bird-log-analyzer-web.modal.run`（`/health` で動作確認、`/analyze` が解析）
