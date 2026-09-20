@@ -1,15 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   buildImportPreview,
   fetchLocationChoices,
   listStorageFileNames,
   runImport,
 } from "../lib/importData";
+import { searchPlaces } from "../lib/geocode";
 import { resetSpeciesChoices } from "../lib/verifications";
 
-const DEFAULT_COORDS = { latitude: "35.319200", longitude: "139.546700" }; // Streamlit の初期値と同じ
+// 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む（管理画面の地図と同じ）
+const LocationPicker = dynamic(() => import("./LocationPicker"), {
+  ssr: false,
+  loading: () => (
+    <div className="rounded-xl border-[3px] border-cardBorder bg-white h-[240px] flex items-center justify-center text-xs text-inkMuted">
+      地図を読み込み中...
+    </div>
+  ),
+});
 
 const cardClass = "bg-white border-[3px] border-cardBorder rounded-2xl p-4";
 const inputClass =
@@ -51,8 +61,16 @@ export default function ImportDataPanel() {
 
   const [selectedLoc, setSelectedLoc] = useState(""); // ""＝新規追加
   const [locName, setLocName] = useState("");
-  const [lat, setLat] = useState(DEFAULT_COORDS.latitude);
-  const [lon, setLon] = useState(DEFAULT_COORDS.longitude);
+  // 新規追加のときは、空から始める（地図で指定するか、直接入力するまで、登録できない）
+  const [lat, setLat] = useState("");
+  const [lon, setLon] = useState("");
+
+  // 新規追加のときの、場所の検索（OpenStreetMap）
+  const [searchText, setSearchText] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState(null); // null＝まだ検索していない
+  const [searchError, setSearchError] = useState(null);
+  const [focus, setFocus] = useState(null); // 検索結果を選んだとき、地図を動かす先
 
   const [csvFiles, setCsvFiles] = useState([]);
   const [mp3Files, setMp3Files] = useState([]);
@@ -69,9 +87,11 @@ export default function ImportDataPanel() {
       setLocations(locs);
       setStorageNames(names);
       setLoadError(null);
+      return locs;
     } catch (err) {
       console.error(err);
       setLoadError("場所や保存済みの音声の一覧を取得できませんでした。通信やログインの状態を確認してください。");
+      return null;
     }
   }
 
@@ -101,10 +121,12 @@ export default function ImportDataPanel() {
 
   function handleSelectLocation(name) {
     setSelectedLoc(name);
+    setSearchResults(null);
+    setSearchError(null);
     if (name === "") {
       setLocName("");
-      setLat(DEFAULT_COORDS.latitude);
-      setLon(DEFAULT_COORDS.longitude);
+      setLat("");
+      setLon("");
       return;
     }
     const loc = locations.find((l) => l.name === name);
@@ -115,10 +137,45 @@ export default function ImportDataPanel() {
     }
   }
 
+  // 地図をタップ・ピンをドラッグ → 緯度経度に入れる
+  function handleMapPick(latitude, longitude) {
+    setLat(latitude.toFixed(6));
+    setLon(longitude.toFixed(6));
+  }
+
+  async function handleSearch() {
+    if (!searchText.trim() || searching) return;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      setSearchResults(await searchPlaces(searchText));
+    } catch (err) {
+      console.error(err);
+      setSearchResults(null);
+      setSearchError("検索できませんでした。通信を確認するか、地図をタップして場所を指定してください。");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  // 検索結果を選ぶ → 地図をその場所に動かし、ピンを立てて、緯度経度に入れる。名前の欄が空なら、名前の候補も入れる
+  function handlePickResult(place) {
+    handleMapPick(place.latitude, place.longitude);
+    setFocus({ lat: place.latitude, lon: place.longitude, nonce: Date.now() });
+    if (!locName.trim()) setLocName(place.suggestedName);
+    setSearchResults(null);
+  }
+
   const latNum = Number(lat);
   const lonNum = Number(lon);
   const coordsValid =
-    lat.trim() !== "" && lon.trim() !== "" && Math.abs(latNum) <= 90 && Math.abs(lonNum) <= 180;
+    lat.trim() !== "" &&
+    lon.trim() !== "" &&
+    Number.isFinite(latNum) &&
+    Number.isFinite(lonNum) &&
+    Math.abs(latNum) <= 90 &&
+    Math.abs(lonNum) <= 180;
+  const isNewLocation = selectedLoc === "";
   const unsafeMp3 = useMemo(
     () => mp3Files.map((f) => f.name).filter((n) => !/^[A-Za-z0-9._-]+$/.test(n)),
     [mp3Files]
@@ -152,7 +209,13 @@ export default function ImportDataPanel() {
         setMp3Files([]);
         setInputKey((k) => k + 1);
         resetSpeciesChoices();
-        reloadChoices();
+        // 新しい場所を登録したときは、次からは「既存の場所」として選ばれた状態にする（続けて登録しやすい）
+        const registeredName = locName.trim();
+        const locs = await reloadChoices();
+        if (locs?.some((l) => l.name === registeredName)) {
+          setSelectedLoc(registeredName);
+          setSearchResults(null);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -181,12 +244,72 @@ export default function ImportDataPanel() {
             </option>
           ))}
         </select>
+
+        {isNewLocation && (
+          <div className="mt-3">
+            <div className="flex gap-2">
+              <input
+                type="search"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                onKeyDown={(e) => {
+                  // 日本語の変換を確定する Enter では、検索しない
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
+                placeholder="場所を検索（例：西湖）"
+                className={inputClass}
+              />
+              <button
+                onClick={handleSearch}
+                disabled={searching || !searchText.trim()}
+                className="shrink-0 rounded-xl bg-[#3F6C74] text-white text-xs font-bold px-4 disabled:opacity-40"
+              >
+                {searching ? "検索中…" : "検索"}
+              </button>
+            </div>
+            {searchError && <p className="mt-2 text-[11px] text-red-500 leading-relaxed">{searchError}</p>}
+            {searchResults && (
+              <div className="mt-2 flex flex-col gap-1 max-h-44 overflow-y-auto">
+                {searchResults.length === 0 && (
+                  <p className="text-[11px] text-inkMuted leading-relaxed">
+                    見つかりませんでした。言葉を変えて検索するか、地図をタップして場所を指定してください。
+                  </p>
+                )}
+                {searchResults.map((p, i) => (
+                  <button
+                    key={`${p.latitude},${p.longitude},${i}`}
+                    onClick={() => handlePickResult(p)}
+                    className="text-left rounded-lg border-2 border-cardBorder bg-page px-3 py-2 hover:border-accent"
+                  >
+                    <div className="text-xs font-bold text-ink">{p.name}</div>
+                    {p.detail && <div className="text-[10px] text-inkMuted mt-0.5">{p.detail}</div>}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="mt-2">
+              <LocationPicker
+                position={coordsValid ? [latNum, lonNum] : null}
+                onPick={handleMapPick}
+                focus={focus}
+                points={locations}
+              />
+            </div>
+            <p className="mt-1.5 text-[10px] text-inkMuted leading-relaxed">
+              地図をタップするか、青いピンをドラッグして、場所を指定します（灰色の点は、登録済みの場所）。
+            </p>
+          </div>
+        )}
+
         <input
           type="text"
           value={locName}
           onChange={(e) => setLocName(e.target.value)}
           placeholder="場所の名前"
-          className={`${inputClass} mt-2`}
+          className={`${inputClass} mt-3`}
         />
         <div className="grid grid-cols-2 gap-2 mt-2">
           <label className="text-[10px] font-bold text-inkMuted">
@@ -198,7 +321,13 @@ export default function ImportDataPanel() {
             <input type="number" step="any" value={lon} onChange={(e) => setLon(e.target.value)} className={`${inputClass} mt-1`} />
           </label>
         </div>
-        {!coordsValid && <p className="mt-2 text-[11px] text-red-500">緯度（-90〜90）と経度（-180〜180）を入れてください。</p>}
+        {!coordsValid && (
+          <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
+            {isNewLocation && lat.trim() === "" && lon.trim() === ""
+              ? "地図で場所を指定するか、緯度・経度を入力してください。"
+              : "緯度（-90〜90）と経度（-180〜180）を入れてください。"}
+          </p>
+        )}
       </div>
 
       <div className={cardClass}>

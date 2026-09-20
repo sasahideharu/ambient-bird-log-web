@@ -12,6 +12,7 @@ import {
 import dynamic from "next/dynamic";
 import { useSystemBars } from "../lib/useSystemBars";
 import { countRejectedRemote } from "../lib/verifications";
+import ImportSection from "./ImportSection";
 
 // 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む
 const LocationMap = dynamic(() => import("./LocationMap"), {
@@ -22,6 +23,13 @@ const LocationMap = dynamic(() => import("./LocationMap"), {
     </div>
   ),
 });
+
+const TABS = [
+  { id: "species", icon: "🐦", label: "鳥から探す" },
+  { id: "location", icon: "📍", label: "観測地点" },
+  { id: "date", icon: "📅", label: "観測日" },
+  { id: "import", icon: "📥", label: "データ登録" },
+];
 
 // 🔥 写真がまだ登録されていない鳥のプレースホルダー色（絵文字はひとまず共通）
 const PLACEHOLDER_COLOR = "#F6E1E4";
@@ -65,6 +73,7 @@ function SpeciesThumb({ species: s }) {
 export default function AdminHome() {
   useSystemBars("light"); // 明るい背景：バーの文字は黒
   const [activeTab, setActiveTab] = useState("species");
+  const [importOpened, setImportOpened] = useState(false); // データ登録タブは、初めて開いたときに読み込み、以後は残す（選んだファイルを失わないため）
   const [minConfidence, setMinConfidence] = useState(60);
   const [keyword, setKeyword] = useState("");
 
@@ -149,41 +158,33 @@ export default function AdminHome() {
           </h1>
         </div>
 
-        {/* タブ */}
-        <div className="flex px-5 pt-4 border-b border-cardBorder">
-          <button
-            onClick={() => setActiveTab("species")}
-            className={`pb-2 mr-6 text-sm font-bold border-b-[3px] transition-colors ${
-              activeTab === "species"
-                ? "text-ink border-accentText"
-                : "text-inkMuted border-transparent"
-            }`}
-          >
-            🐦 鳥から探す
-          </button>
-          <button
-            onClick={() => setActiveTab("location")}
-            className={`pb-2 mr-6 text-sm font-bold border-b-[3px] transition-colors ${
-              activeTab === "location"
-                ? "text-ink border-accentText"
-                : "text-inkMuted border-transparent"
-            }`}
-          >
-            📍 観測地点
-          </button>
-          <button
-            onClick={() => setActiveTab("date")}
-            className={`pb-2 text-sm font-bold border-b-[3px] transition-colors ${
-              activeTab === "date"
-                ? "text-ink border-accentText"
-                : "text-inkMuted border-transparent"
-            }`}
-          >
-            📅 観測日
-          </button>
+        {/* タブ（4つ全部が、スマホの幅でも見えるよう、絵文字を上・文字を下の2段にする） */}
+        <div className="flex px-3 pt-3 border-b border-cardBorder">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => {
+                setActiveTab(t.id);
+                if (t.id === "import") setImportOpened(true);
+              }}
+              className={`flex-1 pb-2 flex flex-col items-center gap-0.5 text-[11px] font-bold border-b-[3px] transition-colors ${
+                activeTab === t.id ? "text-ink border-accentText" : "text-inkMuted border-transparent"
+              }`}
+            >
+              <span className="text-base leading-none">{t.icon}</span>
+              <span className="whitespace-nowrap">{t.label}</span>
+            </button>
+          ))}
         </div>
 
-        {activeTab === "species" ? (
+        {/* データ登録は、初めて開いたときだけ読み込み、他のタブに移っても消さない */}
+        {importOpened && (
+          <div className={activeTab === "import" ? "" : "hidden"}>
+            <ImportSection />
+          </div>
+        )}
+
+        {activeTab === "import" ? null : activeTab === "species" ? (
           <>
             {loading && (
               <p className="text-center text-xs text-inkMuted py-6">読み込み中...</p>
@@ -304,13 +305,6 @@ export default function AdminHome() {
         )}
 
         <div className="mx-4 mb-5 flex flex-col gap-2.5">
-          <Link
-            href="/import"
-            className="flex items-center justify-between rounded-2xl border-[3px] border-cardBorder bg-white px-4 py-3 text-xs font-bold text-[#3F6C74] hover:border-accent transition-colors"
-          >
-            <span>データ登録（CSV・MP3・鳥の写真）</span>
-            <span className="text-accentText text-base">›</span>
-          </Link>
           {rejectedCount > 0 && (
             <Link
               href="/rejected"
