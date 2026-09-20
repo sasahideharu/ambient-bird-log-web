@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   computeSpectrogram,
   normalizeFrames,
@@ -266,13 +267,22 @@ export default function AudioSpectrogramCard({ src, startSec, endSec }) {
                 <ChannelChips view={view} onChange={setView} showLegend />
               </div>
             )}
-            <div className="flex justify-center mt-3">
+            <div className="flex justify-center items-center gap-3 mt-3">
               <button
                 onClick={togglePlay}
                 className="w-10 h-10 rounded-full bg-[#E8AEB8] flex items-center justify-center text-white shadow-[0_3px_0_#C97F8D]"
               >
                 {playing ? "❚❚" : "▶"}
               </button>
+              {src && (
+                // 3D スペクトログラム（縦＝周波数・横＝左右・奥＝時間）。この記録の範囲を、3D で開く
+                <Link
+                  href={`/view3d?src=${encodeURIComponent(src)}${startSec != null ? `&start=${startSec}` : ""}${endSec != null ? `&end=${endSec}` : ""}`}
+                  className="rounded-full border-2 border-cardBorder bg-page px-4 py-2 text-[11px] font-bold text-[#3F6C74] hover:border-accent"
+                >
+                  3Dで見る
+                </Link>
+              )}
             </div>
           </div>
         </div>
