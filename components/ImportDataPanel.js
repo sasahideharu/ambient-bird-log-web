@@ -10,6 +10,7 @@ import {
 } from "../lib/importData";
 import { searchPlaces } from "../lib/geocode";
 import { resetSpeciesChoices } from "../lib/verifications";
+import ServerAnalyzeSection from "./ServerAnalyzeSection";
 
 // 🔥 Leafletはブラウザ専用（windowが必要）のためSSRを無効化して読み込む（管理画面の地図と同じ）
 const LocationPicker = dynamic(() => import("./LocationPicker"), {
@@ -59,6 +60,7 @@ export default function ImportDataPanel() {
   const [storageNames, setStorageNames] = useState(null); // 保存場所にある MP3 の名前（null＝読み込み前）
   const [loadError, setLoadError] = useState(null);
 
+  const [mode, setMode] = useState("server"); // server＝サーバーで解析（MP3 だけ）／csv＝BirdNET の CSV から
   const [selectedLoc, setSelectedLoc] = useState(""); // ""＝新規追加
   const [locName, setLocName] = useState("");
   // 新規追加のときは、空から始める（地図で指定するか、直接入力するまで、登録できない）
@@ -230,6 +232,23 @@ export default function ImportDataPanel() {
     <div className="px-4 pb-6 flex flex-col gap-3">
       {loadError && <p className="text-center text-xs text-red-500 px-2">{loadError}</p>}
 
+      <div className="flex gap-2">
+        {[
+          { id: "server", label: "🖥 サーバーで解析" },
+          { id: "csv", label: "📄 CSVから" },
+        ].map((m) => (
+          <button
+            key={m.id}
+            onClick={() => setMode(m.id)}
+            className={`flex-1 rounded-xl py-2 text-[11px] font-bold border-[3px] transition-colors ${
+              mode === m.id ? "bg-white text-ink border-accentText" : "bg-transparent text-inkMuted border-cardBorder"
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
       <div className={cardClass}>
         <div className="text-xs font-bold text-ink mb-2">📍 場所</div>
         <select
@@ -330,97 +349,117 @@ export default function ImportDataPanel() {
         )}
       </div>
 
-      <div className={cardClass}>
-        <div className="text-xs font-bold text-ink mb-2">📄 BirdNET の CSV（複数OK）</div>
-        <FilePicker label="CSVを選ぶ" accept=".csv,text/csv" files={csvFiles} onPick={setCsvFiles} inputKey={`c${inputKey}`} />
-        <div className="text-xs font-bold text-ink mt-4 mb-2">🎵 録音データ MP3（複数OK）</div>
-        <FilePicker label="MP3を選ぶ" accept=".mp3,audio/mpeg" files={mp3Files} onPick={setMp3Files} inputKey={`m${inputKey}`} />
-        {unsafeMp3.length > 0 && (
-          <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
-            保存できない文字が名前に含まれています（英数字・「.」「_」「-」だけ使えます）：{unsafeMp3.join("、")}
-          </p>
-        )}
-      </div>
-
-      {preview && (
-        <div className={cardClass}>
-          <div className="text-xs font-bold text-ink mb-2">登録前の確認</div>
-          <ul className="text-[11px] text-inkMuted leading-relaxed flex flex-col gap-1">
-            {preview.perFile.map((f) => (
-              <li key={f.name} className={f.error ? "text-red-500" : ""}>
-                {f.name}：{f.error ?? `${f.rows}行・鳥${f.species}種${f.skipped ? `（読めない行 ${f.skipped}行は除きます）` : ""}`}
-              </li>
-            ))}
-          </ul>
-          {preview.duplicates > 0 && (
-            <p className="mt-2 text-[11px] text-inkMuted">同じ記録が重なっていた分（{preview.duplicates}件）は、1つにまとめます。</p>
-          )}
-          {preview.unmatchedKeys.length > 0 && (
-            <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
-              ⚠ 対応する MP3 が見つからないファイル：{preview.unmatchedKeys.join("、")}
-              。再生できない記録が増えないよう、この状態では登録できません。対応する MP3 も選んでください（この画面では、登録した記録を消せません）。
-            </p>
-          )}
-          {preview.ambiguousKeys.length > 0 && (
-            <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
-              ⚠ 同じ番号の MP3 が複数あります：{preview.ambiguousKeys.join("、")}（最初に見つかったものと結びつけます）
-            </p>
-          )}
-        </div>
+      {mode === "server" && (
+        <ServerAnalyzeSection
+          location={{ name: locName, latitude: latNum, longitude: lonNum, valid: coordsValid }}
+          onRegistered={async () => {
+            resetSpeciesChoices();
+            // 新しい場所を登録したときは、次からは「既存の場所」として選ばれた状態にする（続けて登録しやすい）
+            const registeredName = locName.trim();
+            const locs = await reloadChoices();
+            if (locs?.some((l) => l.name === registeredName)) {
+              setSelectedLoc(registeredName);
+              setSearchResults(null);
+            }
+          }}
+        />
       )}
 
-      <div className={cardClass}>
-        <p className="text-[11px] text-inkMuted leading-relaxed">
-          {hasSomething
-            ? `MP3 ${mp3Files.length}件を保存し、記録 ${recordCount}件${preview ? `（鳥${preview.speciesCount}種）` : ""}を「${locName.trim() || "（場所未入力）"}」として登録します。同じ名前の MP3・同じ記録は、上書きされます。`
-            : "CSV や MP3 を選ぶと、ここに登録する内容が出ます。"}
-        </p>
-        <button
-          onClick={handleRun}
-          disabled={blocked}
-          className="mt-3 w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-3 disabled:opacity-40"
-        >
-          {running ? "登録中…" : "🚀 一括登録する"}
-        </button>
-        {running && progress && (
-          <p className="mt-2 text-center text-[11px] text-inkMuted">
-            {STAGE_LABEL[progress.stage]}：{progress.done} / {progress.total}
-          </p>
-        )}
-        {!running && !locName.trim() && hasSomething && (
-          <p className="mt-2 text-center text-[11px] text-red-500">場所の名前を入力してください。</p>
-        )}
-      </div>
-
-      {result && (
-        <div className={`${cardClass} ${result.ok ? "" : "border-red-300"}`}>
-          {result.ok ? (
-            <>
-              <div className="text-xs font-bold text-[#3F6C74]">✓ 登録が完了しました</div>
-              <p className="mt-1 text-[11px] text-inkMuted leading-relaxed">
-                MP3 {result.mp3Saved}件を保存。記録は {result.recordsSent}件を送り、合計 {result.before}件 → {result.after}件
-                （新しく増えたのは {result.after - result.before}件、残り {Math.max(0, result.recordsSent - (result.after - result.before))}件は、同じ記録の上書きです）。
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="text-xs font-bold text-red-500">登録できませんでした</div>
-              <div className="mt-1 text-[11px] text-inkMuted leading-relaxed break-all">
-                {result.failedMp3?.length > 0 && (
-                  <p>
-                    MP3 の保存に失敗（{result.failedMp3.length}件）：
-                    {result.failedMp3.map((f) => `${f.name}（${f.message}）`).join("、")}。記録は登録していません。
-                  </p>
-                )}
-                {result.recordError && (
-                  <p>記録の登録でエラー（{result.recordError}）。ここまでに送った分：{result.recordsSent}件。</p>
-                )}
-                {result.unexpected && <p>予期しないエラー：{result.unexpected}</p>}
-                <p className="mt-1">同じ内容でもう一度登録しても、上書きなので安全です。</p>
-              </div>
-            </>
+      {mode === "csv" && (
+        <>
+        <div className={cardClass}>
+          <div className="text-xs font-bold text-ink mb-2">📄 BirdNET の CSV（複数OK）</div>
+          <FilePicker label="CSVを選ぶ" accept=".csv,text/csv" files={csvFiles} onPick={setCsvFiles} inputKey={`c${inputKey}`} />
+          <div className="text-xs font-bold text-ink mt-4 mb-2">🎵 録音データ MP3（複数OK）</div>
+          <FilePicker label="MP3を選ぶ" accept=".mp3,audio/mpeg" files={mp3Files} onPick={setMp3Files} inputKey={`m${inputKey}`} />
+          {unsafeMp3.length > 0 && (
+            <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
+              保存できない文字が名前に含まれています（英数字・「.」「_」「-」だけ使えます）：{unsafeMp3.join("、")}
+            </p>
           )}
         </div>
+
+        {preview && (
+          <div className={cardClass}>
+            <div className="text-xs font-bold text-ink mb-2">登録前の確認</div>
+            <ul className="text-[11px] text-inkMuted leading-relaxed flex flex-col gap-1">
+              {preview.perFile.map((f) => (
+                <li key={f.name} className={f.error ? "text-red-500" : ""}>
+                  {f.name}：{f.error ?? `${f.rows}行・鳥${f.species}種${f.skipped ? `（読めない行 ${f.skipped}行は除きます）` : ""}`}
+                </li>
+              ))}
+            </ul>
+            {preview.duplicates > 0 && (
+              <p className="mt-2 text-[11px] text-inkMuted">同じ記録が重なっていた分（{preview.duplicates}件）は、1つにまとめます。</p>
+            )}
+            {preview.unmatchedKeys.length > 0 && (
+              <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
+                ⚠ 対応する MP3 が見つからないファイル：{preview.unmatchedKeys.join("、")}
+                。再生できない記録が増えないよう、この状態では登録できません。対応する MP3 も選んでください（この画面では、登録した記録を消せません）。
+              </p>
+            )}
+            {preview.ambiguousKeys.length > 0 && (
+              <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
+                ⚠ 同じ番号の MP3 が複数あります：{preview.ambiguousKeys.join("、")}（最初に見つかったものと結びつけます）
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className={cardClass}>
+          <p className="text-[11px] text-inkMuted leading-relaxed">
+            {hasSomething
+              ? `MP3 ${mp3Files.length}件を保存し、記録 ${recordCount}件${preview ? `（鳥${preview.speciesCount}種）` : ""}を「${locName.trim() || "（場所未入力）"}」として登録します。同じ名前の MP3・同じ記録は、上書きされます。`
+              : "CSV や MP3 を選ぶと、ここに登録する内容が出ます。"}
+          </p>
+          <button
+            onClick={handleRun}
+            disabled={blocked}
+            className="mt-3 w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-3 disabled:opacity-40"
+          >
+            {running ? "登録中…" : "🚀 一括登録する"}
+          </button>
+          {running && progress && (
+            <p className="mt-2 text-center text-[11px] text-inkMuted">
+              {STAGE_LABEL[progress.stage]}：{progress.done} / {progress.total}
+            </p>
+          )}
+          {!running && !locName.trim() && hasSomething && (
+            <p className="mt-2 text-center text-[11px] text-red-500">場所の名前を入力してください。</p>
+          )}
+        </div>
+
+        {result && (
+          <div className={`${cardClass} ${result.ok ? "" : "border-red-300"}`}>
+            {result.ok ? (
+              <>
+                <div className="text-xs font-bold text-[#3F6C74]">✓ 登録が完了しました</div>
+                <p className="mt-1 text-[11px] text-inkMuted leading-relaxed">
+                  MP3 {result.mp3Saved}件を保存。記録は {result.recordsSent}件を送り、合計 {result.before}件 → {result.after}件
+                  （新しく増えたのは {result.after - result.before}件、残り {Math.max(0, result.recordsSent - (result.after - result.before))}件は、同じ記録の上書きです）。
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="text-xs font-bold text-red-500">登録できませんでした</div>
+                <div className="mt-1 text-[11px] text-inkMuted leading-relaxed break-all">
+                  {result.failedMp3?.length > 0 && (
+                    <p>
+                      MP3 の保存に失敗（{result.failedMp3.length}件）：
+                      {result.failedMp3.map((f) => `${f.name}（${f.message}）`).join("、")}。記録は登録していません。
+                    </p>
+                  )}
+                  {result.recordError && (
+                    <p>記録の登録でエラー（{result.recordError}）。ここまでに送った分：{result.recordsSent}件。</p>
+                  )}
+                  {result.unexpected && <p>予期しないエラー：{result.unexpected}</p>}
+                  <p className="mt-1">同じ内容でもう一度登録しても、上書きなので安全です。</p>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        </>
       )}
     </div>
   );

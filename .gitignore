@@ -2,3 +2,7 @@ node_modules/
 .next/
 out/
 .env.local
+
+# 解析サーバー（Modal）用の Python 環境
+server/.venv/
+server/__pycache__/

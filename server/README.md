@@ -1,0 +1,67 @@
+# 解析サーバー（Modal）
+
+BirdNET で MP3 を解析して、結果（3秒ごとの記録）を返すサーバーです。データ登録画面の「サーバーで解析」から呼ばれます。
+
+## しくみ
+
+```
+画面（ログイン中の管理者）
+  ① MP3 を保管場所（bird-wav）に保存
+  ② POST /analyze  … ログインのトークン付き。MP3 の名前（10本まで）・下限・場所を送る
+        ↓
+  門番（web）… トークンと管理者名簿を、Supabase に問い合わせて確認 → 通ったときだけ ↓
+        ↓
+  解析（analyze_batch）… 保管場所から MP3 を取り、BirdNET で解析して、結果を返す
+  ③ 画面が、結果を確認してから、記録を登録（モデル名・バージョン・解析日時・設定つき）
+```
+
+- **サーバーは、記録を書き込みません。** データベースの鍵も持ちません。結果を返すだけです。
+  書き込みは、画面が、ログイン中の管理者の権限で行います（データベース側で、管理者名簿にいる人だけに制限）。
+- 呼び出せるのは、ログイン中の管理者だけです。門番は軽い関数で、確認が通らない限り、重い解析は動きません。
+- 接続元（CORS）は、本番の画面・手元の確認・iPhone/Android アプリだけです（`ALLOWED_ORIGINS`）。
+
+## 解析の設定
+
+| 項目 | 標準 | 備考 |
+|---|---|---|
+| モデル | BirdNET 2.4（birdnet-analyzer 2.4.0） | 非営利ライセンス（CC BY-NC-SA 4.0）。個人の利用のみ。営利にするときは、Cornell 大学への相談か、別モデル（Perch など）への切り替えが必要 |
+| 区間 | 3秒（固定）・重ならない | 最後の1秒未満は解析されない |
+| 信頼度の下限 | 0.25 | 画面で 0.1／0.01 も選べる |
+| 鳥の絞り込み | 場所＋時期あり | 場所＝登録画面の場所の緯度経度、時期＝ファイル名の先頭 YYMMDD から求めた週（BirdNET は1か月を4週として、1〜48）。基準 0.03。画面で切り替え可 |
+| 名前 | 日本語（`--locale ja`） | |
+
+Mac の BirdNET の画面＋CSV で解析していた、いまの記録と、同じ設定です（既存の5ファイルで、信頼度0.25以上の28行が、28行すべて一致）。
+ただし、サーバーが解析するのは **MP3**（元の WAV ではない）ので、信頼度が、平均0.012ほど（最大0.1）違います。
+
+## 公開・停止・試験
+
+すべて、リポジトリのルートで実行します（Python の環境は `server/.venv`。Git には入れません）。
+
+```bash
+# 初回だけ：環境を作る
+python3 -m venv server/.venv && server/.venv/bin/pip install modal
+server/.venv/bin/python -m modal setup          # ブラウザで Modal にログイン（GitHub）
+
+# 公開（入口 URL は lib/analyzerConfig.js と同じ）
+server/.venv/bin/python -m modal deploy server/analyzer_app.py
+
+# 止める
+server/.venv/bin/python -m modal app stop ambient-bird-log-analyzer
+
+# 試験（何も書き込まない。既存の MP3 を解析して、結果をファイルに保存）
+server/.venv/bin/python -m modal run server/analyzer_app.py::selftest
+```
+
+入口の URL：`https://sasahideharu--ambient-bird-log-analyzer-web.modal.run`（`/health` で動作確認、`/analyze` が解析）
+
+## 制限
+
+- 1回の呼び出しで、MP3 は10本まで（Modal の web は1リクエスト150秒まで。画面が、10本ずつ自動で分けて呼ぶ）
+- 1ファイル20MBまで。名前は英数字と `. _ -` だけで、拡張子は小文字の `.mp3`
+- 初回（サーバーが眠っているとき）は、起動とモデルの読み込みで、1分近くかかる
+
+## 次の段階（未実装）
+
+- WAV を直接アップロードして、サーバーで MP3 に変換・解析する（MP3 より、元の WAV のほうが、精度が高い）
+- Perch との照合（birdnet-analyzer には `--use_perch` がある）
+- 「録音1本につき、鳥1種を1件にまとめる」表示
