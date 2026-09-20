@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useEffect, useMemo } from "react";
-import Link from "next/link";
+import BackLink from "../../components/BackLink";
 import { useSearchParams } from "next/navigation";
 import { fetchLocationDetail } from "../../lib/locationDetail";
 import { getAudioUrl } from "../../lib/queries";
@@ -62,9 +62,9 @@ function LocationDetailInner() {
   return (
     <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
-        <Link href="/" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
+        <BackLink fallbackHref="/" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
           ‹ 観測地点に戻る
-        </Link>
+        </BackLink>
 
         {loading && <p className="text-center text-xs text-inkMuted py-10">読み込み中...</p>}
         {loadError && <p className="text-center text-xs text-red-500 py-10 px-6">{loadError}</p>}

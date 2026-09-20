@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { assertAudioResponse } from "../lib/audioResponse";
 import {
   computeSpectrogram,
   normalizeFrames,
@@ -210,7 +211,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
           arrayBuffer = await file.arrayBuffer();
         } else if (src) {
           const res = await fetch(src);
-          if (!res.ok) throw new Error(`音声を取得できませんでした（${res.status}）`);
+          assertAudioResponse(res);
           arrayBuffer = await res.arrayBuffer();
         } else {
           throw new Error("音声が指定されていません");

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
+import { Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { canGoBackInApp } from "../lib/backNav";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
 import { useLoginState } from "../lib/useLoginState";
 import { signOut } from "../lib/auth";
@@ -49,8 +51,11 @@ function MinimalThumb({ species: s, onSelect }) {
 }
 
 // promptLogin: 管理画面（?admin=true）にログイン無しで来たときに、最初からログイン画面を開く
-export default function MinimalHome({ promptLogin = false }) {
+function MinimalHomeInner({ promptLogin = false }) {
   useSystemBars("dark"); // 暗い背景：バーの文字は白
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
   const login = useLoginState();
   const [loginOpen, setLoginOpen] = useState(promptLogin);
   const [rawDetections, setRawDetections] = useState([]);
@@ -60,7 +65,18 @@ export default function MinimalHome({ promptLogin = false }) {
   const [bgRevealed, setBgRevealed] = useState(false);
   const [contentRevealed, setContentRevealed] = useState(false);
   const [bgHeight, setBgHeight] = useState(null);
-  const [selectedSpecies, setSelectedSpecies] = useState(null);
+  // 🔥 鳥の窓は、画面の住所（?bird=鳥の名前）と連動させる。開くと履歴が1つ増え、「×」で1つ戻る。
+  //    こうすると、窓から別の画面（3D の全画面・音声の編集）へ行って戻ったとき、鳥の窓が開いた状態に戻る（トップまで戻らない）
+  const selectedSpecies = params.get("bird");
+  const openBird = useCallback(
+    (name) => router.push(`${pathname}?bird=${encodeURIComponent(name)}`, { scroll: false }),
+    [router, pathname]
+  );
+  const closeBird = useCallback(() => {
+    if (canGoBackInApp()) router.back();
+    // この住所を、直接開いたときだけ（戻る先が無い）：住所から ?bird= を外す（router.replace は、同じ画面への移動のため、住所が変わらなかった。住所を直接書き換えると、Next.js のルーターと同期される）
+    else window.history.replaceState(null, "", pathname);
+  }, [router, pathname]);
   const [orderMap, setOrderMap] = useState(() => ({ ...getSessionOrderMap() }));
 
   // 🔥 アプリ（iPhone/Android）のときだけ「オフライン保存」を出す。
@@ -230,7 +246,7 @@ export default function MinimalHome({ promptLogin = false }) {
           style={{ transitionDelay: "5200ms", transitionDuration: "2000ms" }}
         >
           {visible.map((s) => (
-            <MinimalThumb key={s.name} species={s} onSelect={setSelectedSpecies} />
+            <MinimalThumb key={s.name} species={s} onSelect={openBird} />
           ))}
           {visible.length === 0 && (
             <p className="col-span-3 text-center text-white/50 text-xs py-4">
@@ -328,7 +344,7 @@ export default function MinimalHome({ promptLogin = false }) {
 
       <MinimalBirdModal
         speciesName={selectedSpecies}
-        onClose={() => setSelectedSpecies(null)}
+        onClose={closeBird}
         onChanged={loadData}
       />
 
@@ -346,5 +362,13 @@ export default function MinimalHome({ promptLogin = false }) {
         notice={promptLogin ? "観測地点・観測日・地図の画面は、ログインが必要です。" : null}
       />
     </div>
+  );
+}
+
+export default function MinimalHome(props) {
+  return (
+    <Suspense fallback={null}>
+      <MinimalHomeInner {...props} />
+    </Suspense>
   );
 }

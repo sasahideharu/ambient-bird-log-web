@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
+import BackLink from "../../components/BackLink";
 import { fetchRejectedRemote, getAudioUrl } from "../../lib/queries";
 import { deleteVerification } from "../../lib/verifications";
 import { toRecord } from "../../lib/record";
@@ -54,9 +54,9 @@ export default function RejectedPage() {
   return (
     <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
-        <Link href="/admin" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
+        <BackLink fallbackHref="/admin" className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
           ‹ 管理画面に戻る
-        </Link>
+        </BackLink>
 
         <div className="mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4">
           <div className="font-display text-xl">除外した記録</div>

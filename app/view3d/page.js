@@ -4,6 +4,7 @@ import { Suspense, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSystemBars } from "../../lib/useSystemBars";
+import { goBack } from "../../lib/backNav";
 
 // 🔥 3D 表示の部品（three.js）は、大きいので、この画面を開いたときだけ読み込む（他の画面は、重くならない）
 const Spectrogram3D = dynamic(() => import("../../components/Spectrogram3D"), {
@@ -41,10 +42,7 @@ function View3DInner() {
     return `${name}${range}`;
   }, [src, start, end]);
 
-  const close = () => {
-    if (window.history.length > 1) router.back();
-    else router.push("/");
-  };
+  const close = () => goBack(router, "/"); // 一つ前の画面へ（直接開いたときだけ、トップへ）
 
   return <Spectrogram3D src={src} startSec={start} endSec={end != null && start != null && end > start ? end : null} title={title} onClose={close} />;
 }

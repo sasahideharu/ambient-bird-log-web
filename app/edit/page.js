@@ -6,6 +6,7 @@ import { getAudioUrl } from "../../lib/queries";
 import AudioEditor from "../../components/AudioEditor";
 import { useSystemBars } from "../../lib/useSystemBars";
 import { useLoginState } from "../../lib/useLoginState";
+import { goBack } from "../../lib/backNav";
 
 // 🔥 音声の編集（ログイン中の人だけ）。アプリ化（静的書き出し）に対応するため、URLは
 //    /edit?name=260712_043_Tr1.mp3&start=3&end=12 の形にしている。
@@ -29,7 +30,7 @@ function EditInner() {
   return (
     <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden pb-6">
-        <button onClick={() => router.back()} className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
+        <button onClick={() => goBack(router, "/")} className="block px-4 pt-4 text-xs font-bold text-[#3F6C74]">
           ‹ 戻る
         </button>
 
