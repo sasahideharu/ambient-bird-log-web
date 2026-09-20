@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { computeSpectrogram, drawSpectrogram } from "../lib/spectrogram";
 import {
-  renderFocused,
+  computeSpectrogram,
+  normalizeFrames,
+  drawSpectrogram,
+  drawStereoSpectrogram,
+  STEREO_COLORS,
+  channelIsOn,
+  toggleChannel,
+} from "../lib/spectrogram";
+import {
+  renderFocusedMulti,
   focusGainDb,
   suggestBand,
   DEFAULT_FOCUS,
@@ -154,13 +162,15 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   const [playing, setPlaying] = useState(null); // { kind, id }
   const [busy, setBusy] = useState(false);
   const [playError, setPlayError] = useState(null);
+  const [channelView, setChannelView] = useState("LR"); // ステレオの表示（「左」「右」の2つのスイッチ）：LR＝両方オン（色分けして重ねる）／L＝左だけ／R＝右だけ
   const [hover, setHover] = useState(null); // マウスを乗せている部分 { id, type, hx, hy, handle }
   const [drag, setDrag] = useState(null); // 操作中の部分 { id, type, hx, hy, handle }
   const [coarse, setCoarse] = useState(false); // 指で操作する端末（点を大きくする）
   const hoverKeyRef = useRef("");
 
-  const audioRef = useRef(null); // { samples, sampleRate, duration }
-  const framesRef = useRef(null);
+  const audioRef = useRef(null); // { channels（左右など・Float32Array の配列）, sampleRate, duration }
+  const framesRef = useRef(null); // 左右の「強い方」（周波数の自動提案に使う）
+  const framesChRef = useRef([]); // チャンネルごとのスペクトログラム（ステレオの色分け表示に使う）
   const wrapRef = useRef(null);
   const specRef = useRef(null);
   const overlayRef = useRef(null);
@@ -204,23 +214,31 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
         const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
         const decoder = new Offline(1, 1, 48000);
         const buf = await new Promise((resolve, reject) => decoder.decodeAudioData(arrayBuffer.slice(0), resolve, reject));
-        // モノラルにする（複数チャンネルは平均）
-        const mono = new Float32Array(buf.length);
-        for (let c = 0; c < buf.numberOfChannels; c++) {
-          const ch = buf.getChannelData(c);
-          for (let i = 0; i < ch.length; i++) mono[i] += ch[i] / buf.numberOfChannels;
-        }
+        // チャンネル（モノラル＝1本、ステレオ＝2本）を、そのまま持つ。加工・再生・書き出しは、チャンネルごとに行い、ステレオのまま扱う
+        const channels = [];
+        for (let c = 0; c < buf.numberOfChannels; c++) channels.push(new Float32Array(buf.getChannelData(c)));
+        // スペクトログラムは、チャンネルごとに作り、各点で「強い方」を採る（左右を混ぜて1つにすると、
+        // 2本のマイクで位相がずれた音が、打ち消し合って、鳥の声が弱く見えることがあるため）
         const hop = Math.max(128, Math.ceil(buf.length / 1600));
-        const { frames, topHz: top } = computeSpectrogram(mono, {
-          fftSize: 2048,
-          hop,
-          bins: 128,
-          sampleRate: buf.sampleRate,
-          maxFreqHz: MAX_FREQ_HZ,
-        });
+        const specs = channels.map((ch) =>
+          computeSpectrogram(ch, {
+            fftSize: 2048,
+            hop,
+            bins: 128,
+            sampleRate: buf.sampleRate,
+            maxFreqHz: MAX_FREQ_HZ,
+          })
+        );
+        const top = specs[0].topHz;
+        // 左右に、共通の明るさの基準（大きい方の最大値）を使う＝左右の音量の差が、明るさの差として残る
+        const sharedMaxDb = Math.max(...specs.map((sp) => sp.maxDb));
+        const perChannel = specs.map((sp) => normalizeFrames(sp.rawFrames, sharedMaxDb));
+        // 周波数の自動提案には、各点で、左右の強い方を使う
+        const frames = perChannel.reduce((acc, cur) => (acc ? acc.map((row, fi) => row.map((v, b) => Math.max(v, cur[fi][b]))) : cur), null);
         if (cancelled) return;
-        audioRef.current = { samples: mono, sampleRate: buf.sampleRate, duration: buf.duration };
+        audioRef.current = { channels, sampleRate: buf.sampleRate, duration: buf.duration };
         framesRef.current = frames;
+        framesChRef.current = perChannel;
         setTopHz(top);
         setDuration(buf.duration);
         if (initialRange && initialRange.end > initialRange.start) {
@@ -279,8 +297,13 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
     const c = specRef.current;
     c.width = Math.round(width * dpr);
     c.height = Math.round(CANVAS_H * dpr);
-    drawSpectrogram(c, framesRef.current, { nyquist: topHz, showLabels: true });
-  }, [status, width, topHz, dpr]);
+    const per = framesChRef.current;
+    if (per.length >= 2) {
+      drawStereoSpectrogram(c, per[0], per[1], { view: channelView, nyquist: topHz, showLabels: true });
+    } else {
+      drawSpectrogram(c, framesRef.current, { nyquist: topHz, showLabels: true });
+    }
+  }, [status, width, topHz, dpr, channelView]);
 
   // 選んだ範囲・再生位置（何度でも描き直す）
   const drawOverlay = useCallback(() => {
@@ -566,7 +589,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
     const key = JSON.stringify([s.t0, s.t1, s.fLo, s.fHi, s.mode, s.strengthDb, s.curve, s.octaveDb, normalize]);
     let y = cacheRef.current.get(key);
     if (!y) {
-      y = renderFocused(a.samples, a.sampleRate, { t0: s.t0, t1: s.t1, fLo: s.fLo, fHi: s.fHi, topHz }, s, { normalize });
+      y = renderFocusedMulti(a.channels, a.sampleRate, { t0: s.t0, t1: s.t1, fLo: s.fLo, fHi: s.fHi, topHz }, s, { normalize });
       if (cacheRef.current.size > 16) cacheRef.current.clear();
       cacheRef.current.set(key, y);
     }
@@ -603,19 +626,19 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
 
     setBusy(true);
     await new Promise((r) => setTimeout(r, 20)); // 「加工中」の表示を先に出す
-    let samples;
+    let samples; // チャンネルごとの波形の配列
     let t0 = 0;
     if (kind === "full") {
-      samples = a.samples;
+      samples = a.channels;
     } else if (kind === "original") {
-      samples = a.samples.subarray(Math.floor(s.t0 * a.sampleRate), Math.ceil(s.t1 * a.sampleRate));
+      samples = a.channels.map((c) => c.subarray(Math.floor(s.t0 * a.sampleRate), Math.ceil(s.t1 * a.sampleRate)));
       t0 = s.t0;
     } else {
       samples = getFocused(s);
       t0 = s.t0;
     }
     setBusy(false);
-    if (samples.length === 0) return;
+    if (samples[0].length === 0) return;
 
     const url = URL.createObjectURL(encodeWav(samples, a.sampleRate));
     const previous = blobUrlRef.current;
@@ -693,13 +716,57 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
           </div>
         )}
 
+        {status === "ready" && framesChRef.current.length >= 2 && (
+          <div className="mt-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] font-bold text-inkMuted">ステレオの表示：</span>
+              {[
+                { id: "L", label: "左", color: STEREO_COLORS.left },
+                { id: "R", label: "右", color: STEREO_COLORS.right },
+              ].map((v) => {
+                const on = channelIsOn(channelView, v.id);
+                const rgb = v.color.join(",");
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setChannelView((cur) => toggleChannel(cur, v.id))}
+                    aria-pressed={on}
+                    aria-label={`${v.label}を表示${on ? "（オン）" : "（オフ）"}`}
+                    className="rounded-full border-2 px-4 py-1 text-[12px] font-bold"
+                    style={
+                      on
+                        ? { borderColor: `rgb(${rgb})`, color: `rgb(${rgb})`, backgroundColor: `rgba(${rgb},0.12)` }
+                        : { borderColor: "#E9E6E1", color: "#9C978F", backgroundColor: "#F6F4F0" }
+                    }
+                  >
+                    {on ? "✓ " : ""}
+                    {v.label}
+                  </button>
+                );
+              })}
+              <span className="text-[10px] text-inkMuted">両方オン＝左右を色分けして重ねる</span>
+            </div>
+            {channelView === "LR" && (
+              <div className="mt-1 text-[10px] text-inkMuted leading-relaxed">
+                <span style={{ color: `rgb(${STEREO_COLORS.left.join(",")})` }} className="font-bold">■ 青＝左</span>
+                {"　"}
+                <span style={{ color: `rgb(${STEREO_COLORS.right.join(",")})` }} className="font-bold">■ 橙＝右</span>
+                {"　"}白っぽい＝左右どちらにも出ている音（半透明に重ねています）
+              </div>
+            )}
+          </div>
+        )}
+
         {status === "ready" && (
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <button onClick={() => (playing?.kind === "full" ? stopPlayback() : play("full", null))} className={btnClass}>
               {playing?.kind === "full" ? "■ 停止" : "▶ 全体を再生"}
             </button>
             <span className="text-[10px] text-inkMuted">
-              長さ {duration.toFixed(1)}秒{audioRef.current ? `・${(audioRef.current.sampleRate / 1000).toFixed(0)}kHz` : ""}
+              長さ {duration.toFixed(1)}秒
+              {audioRef.current
+                ? `・${(audioRef.current.sampleRate / 1000).toFixed(0)}kHz・${audioRef.current.channels.length === 2 ? "ステレオ" : audioRef.current.channels.length === 1 ? "モノラル" : `${audioRef.current.channels.length}ch`}`
+                : ""}
             </span>
           </div>
         )}

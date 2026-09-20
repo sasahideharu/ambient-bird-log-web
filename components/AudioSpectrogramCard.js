@@ -1,7 +1,53 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { computeSpectrogram, drawSpectrogram } from "../lib/spectrogram";
+import {
+  computeSpectrogram,
+  normalizeFrames,
+  drawSpectrogram,
+  drawStereoSpectrogram,
+  STEREO_COLORS,
+  channelIsOn,
+  toggleChannel,
+} from "../lib/spectrogram";
+
+// ステレオの表示の切り替え（「左」「右」の2つのスイッチ。両方オン＝色分けして重ねる／片方だけ＝その片方だけ）。左＝青・右＝オレンジ
+function ChannelChips({ view, onChange, showLegend = false }) {
+  const chips = [
+    { id: "L", label: "左", color: STEREO_COLORS.left },
+    { id: "R", label: "右", color: STEREO_COLORS.right },
+  ];
+  return (
+    <div className="flex items-center gap-1">
+      {chips.map((c) => {
+        const on = channelIsOn(view, c.id);
+        const rgb = c.color.join(",");
+        return (
+          <button
+            key={c.id}
+            onClick={() => onChange(toggleChannel(view, c.id))}
+            aria-pressed={on}
+            aria-label={`${c.label}を表示${on ? "（オン）" : "（オフ）"}`}
+            className="rounded-full border px-2.5 py-[1px] text-[10px] font-bold leading-4"
+            style={
+              on
+                ? { borderColor: `rgb(${rgb})`, color: `rgb(${rgb})`, backgroundColor: `rgba(${rgb},0.12)` }
+                : { borderColor: "#E9E6E1", color: "#9C978F", backgroundColor: "#F6F4F0" }
+            }
+          >
+            {on ? "✓" : ""}
+            {c.label}
+          </button>
+        );
+      })}
+      {showLegend && (
+        <span className="ml-1 text-[9px] text-inkMuted">
+          {view === "LR" ? "両方オン＝色分けして重ねる（白っぽい＝左右どちらにも出ている音）" : view === "L" ? "左だけを表示中" : "右だけを表示中"}
+        </span>
+      )}
+    </div>
+  );
+}
 
 // 🔥 音声再生・スペクトログラム表示・再生位置と連動したプレイヘッド・タップで拡大表示をまとめたカード
 export default function AudioSpectrogramCard({ src, startSec, endSec }) {
@@ -9,32 +55,35 @@ export default function AudioSpectrogramCard({ src, startSec, endSec }) {
   const canvasRef = useRef(null);
   const modalCanvasRef = useRef(null);
   const rafRef = useRef(null);
-  const framesRef = useRef(null);
+  const framesRef = useRef(null); // チャンネルごとのスペクトログラムの配列（モノラル＝1本、ステレオ＝2本）
   const nyquistRef = useRef(null);
 
   const [status, setStatus] = useState("loading"); // loading | ready | error
   const [playing, setPlaying] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [view, setView] = useState("LR"); // ステレオの表示：LR＝左右を色分けして重ねる／L＝左だけ／R＝右だけ
+  const [numChannels, setNumChannels] = useState(1);
+
+  const paint = useCallback(
+    (canvas, playheadT, showLabels) => {
+      const chans = framesRef.current;
+      if (!chans || !canvas) return;
+      if (chans.length >= 2) {
+        drawStereoSpectrogram(canvas, chans[0], chans[1], { view, nyquist: nyquistRef.current, playheadT, showLabels });
+      } else {
+        drawSpectrogram(canvas, chans[0], { nyquist: nyquistRef.current, playheadT, showLabels });
+      }
+    },
+    [view]
+  );
 
   const redraw = useCallback(
     (playheadT) => {
       if (!framesRef.current) return;
-      if (canvasRef.current) {
-        drawSpectrogram(canvasRef.current, framesRef.current, {
-          nyquist: nyquistRef.current,
-          playheadT,
-          showLabels: false,
-        });
-      }
-      if (expanded && modalCanvasRef.current) {
-        drawSpectrogram(modalCanvasRef.current, framesRef.current, {
-          nyquist: nyquistRef.current,
-          playheadT,
-          showLabels: true,
-        });
-      }
+      paint(canvasRef.current, playheadT, false);
+      if (expanded) paint(modalCanvasRef.current, playheadT, true);
     },
-    [expanded]
+    [expanded, paint]
   );
 
   useEffect(() => {
@@ -52,25 +101,39 @@ export default function AudioSpectrogramCard({ src, startSec, endSec }) {
         const ctx = new AudioCtx();
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
         const sampleRate = audioBuffer.sampleRate;
-        const channel = audioBuffer.getChannelData(0);
         const s = Math.max(0, Math.floor((startSec ?? 0) * sampleRate));
         const e = Math.min(
-          channel.length,
+          audioBuffer.length,
           Math.floor((endSec ?? audioBuffer.duration) * sampleRate)
         );
-        const slice = channel.slice(s, e);
-        const { frames, topHz } = computeSpectrogram(slice, {
-          fftSize: 2048,
-          hop: 96,
-          bins: 160,
-          sampleRate,
-          maxFreqHz: 13500,
-        });
+        // 🔥 ステレオ（左右のマイクが離れている録音）は、左右それぞれのスペクトログラムを作り、色分けして重ねて表示する（左＝青・右＝オレンジ。
+        //    左右を選んで、片方だけを見ることもできる）。左だけでは、右のマイクにだけ鳴いた鳥が見えず、左右を混ぜて1つにすると、
+        //    位相のずれた音が打ち消し合って、鳥の声が弱く見えることがあるため。
+        //    計算が増えすぎないよう、ステレオのときだけ、時間の細かさ（hop）を、画面の細かさに見合う程度まで粗くする（モノラルは、今までどおり）
+        const chCount = audioBuffer.numberOfChannels;
+        const hop = chCount > 1 ? Math.max(96, Math.ceil((e - s) / 1500)) : 96;
+        const specs = [];
+        for (let c = 0; c < Math.min(chCount, 2); c++) {
+          specs.push(
+            computeSpectrogram(audioBuffer.getChannelData(c).slice(s, e), {
+              fftSize: 2048,
+              hop,
+              bins: 160,
+              sampleRate,
+              maxFreqHz: 13500,
+            })
+          );
+        }
+        const topHz = specs[0].topHz;
+        // 左右に、共通の明るさの基準（大きい方の最大値）を使う＝左右の音量の差が、明るさの差として残る
+        const sharedMaxDb = Math.max(...specs.map((sp) => sp.maxDb));
+        const perChannel = specs.length > 1 ? specs.map((sp) => normalizeFrames(sp.rawFrames, sharedMaxDb)) : [specs[0].frames];
         ctx.close();
         if (cancelled) return;
 
-        framesRef.current = frames;
+        framesRef.current = perChannel;
         nyquistRef.current = topHz;
+        setNumChannels(perChannel.length);
         setStatus("ready");
         requestAnimationFrame(() => redraw(0));
       } catch (err) {
@@ -86,11 +149,11 @@ export default function AudioSpectrogramCard({ src, startSec, endSec }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, startSec, endSec]);
 
-  // 拡大表示を開いたタイミングで、その時点の状態をすぐ描き直す
+  // 拡大表示を開いたとき・左右の表示を切り替えたときに、その時点の状態をすぐ描き直す
   useEffect(() => {
-    if (expanded) redraw(playing ? currentPlayheadT() : 0);
+    if (status === "ready") redraw(playing ? currentPlayheadT() : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded]);
+  }, [expanded, view]);
 
   function currentPlayheadT() {
     const audio = audioRef.current;
@@ -171,6 +234,12 @@ export default function AudioSpectrogramCard({ src, startSec, endSec }) {
         </button>
       </div>
 
+      {numChannels >= 2 && status === "ready" && (
+        <div className="mt-1 pl-11">
+          <ChannelChips view={view} onChange={setView} />
+        </div>
+      )}
+
       {expanded && (
         <div
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-6"
@@ -192,6 +261,11 @@ export default function AudioSpectrogramCard({ src, startSec, endSec }) {
               height={460}
               style={{ width: "100%", height: "auto", borderRadius: 8, display: "block" }}
             />
+            {numChannels >= 2 && (
+              <div className="mt-2">
+                <ChannelChips view={view} onChange={setView} showLegend />
+              </div>
+            )}
             <div className="flex justify-center mt-3">
               <button
                 onClick={togglePlay}

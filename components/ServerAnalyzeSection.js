@@ -33,6 +33,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
   const [inputKey, setInputKey] = useState(0);
   const [minConf, setMinConf] = useState("0.25");
   const [useFilter, setUseFilter] = useState(true); // 場所＋時期で、鳥を絞り込む（標準：オン）
+  const [stereoBest, setStereoBest] = useState(true); // ステレオは、左右も別々に解析して、強い方を採る（標準：オン）
 
   const [phase, setPhase] = useState("idle"); // idle | working | analyzed | registering
   const [progress, setProgress] = useState(null);
@@ -44,7 +45,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
   useEffect(() => {
     setAnalysis(null);
     setError(null);
-  }, [mp3Files, minConf, useFilter, location.latitude, location.longitude]);
+  }, [mp3Files, minConf, useFilter, stereoBest, location.latitude, location.longitude]);
 
   const invalidNames = useMemo(() => mp3Files.map((f) => f.name).filter((n) => !VALID_MP3_NAME.test(n)), [mp3Files]);
   const canAnalyze = mp3Files.length > 0 && invalidNames.length === 0 && !!location.name.trim() && location.valid && phase === "idle";
@@ -80,6 +81,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
         minConf: Number(minConf),
         location: useFilter ? { lat: location.latitude, lon: location.longitude } : null,
         useWeek: useFilter,
+        stereo: stereoBest ? "best" : "mix",
         onProgress: setProgress,
       });
       const existing = await fetchExistingRecords(names);
@@ -180,6 +182,17 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
           </span>
         </label>
 
+        <label className="mt-3 flex items-start gap-2 text-[11px] text-ink leading-relaxed">
+          <input type="checkbox" checked={stereoBest} onChange={(e) => setStereoBest(e.target.checked)} disabled={busy} className="mt-0.5" />
+          <span>
+            <b>ステレオは、左右も別々に解析して、強い方を採る</b>（標準：オン）
+            <br />
+            <span className="text-inkMuted">
+              左右のマイクが離れていると、混ぜたときに、鳥の声が弱くなることがあります。Mac の BirdNET の画面（左右を混ぜた音だけ）と同じにしたいときは、オフにします。モノラルの録音には、関係ありません。
+            </span>
+          </span>
+        </label>
+
         <button
           onClick={handleAnalyze}
           disabled={!canAnalyze}
@@ -207,6 +220,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
             {analysis.meta.params.location_filter
               ? `場所${analysis.meta.params.use_week ? "＋時期" : ""}で絞り込み`
               : "絞り込みなし"}
+            ・{analysis.meta.params.stereo === "best" ? "ステレオは左右も別々に" : "左右を混ぜた音だけ"}
             ・サーバーの処理 {Math.round(analysis.elapsedSec)}秒
           </p>
           <p className="mt-1 text-[11px] text-ink font-bold">
@@ -236,6 +250,11 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
                       : `記録 ${res.rows.length}件・${top.map(([n, v]) => `${n} ${Math.round(v * 100)}%`).join("、")}`}
                     {res.week != null && `（週 ${res.week}）`}
                   </div>
+                  {res.stereo && (
+                    <div>
+                      ステレオ（左右も別々に解析）：混ぜた音だけの場合より、増えた・高くなった記録 {res.stereo.gained_vs_mix}件
+                    </div>
+                  )}
                   <div>
                     {c && c.existingTotal > 0
                       ? `既存 ${c.existingTotal}件：同じ ${c.same}・値が変わる ${c.changed}・新しく増える ${c.new}${
