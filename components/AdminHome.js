@@ -303,15 +303,24 @@ export default function AdminHome() {
           </div>
         )}
 
-        {rejectedCount > 0 && (
+        <div className="mx-4 mb-5 flex flex-col gap-2.5">
           <Link
-            href="/rejected"
-            className="mx-4 mb-5 flex items-center justify-between rounded-2xl border-[3px] border-cardBorder bg-white px-4 py-3 text-xs font-bold text-[#3F6C74] hover:border-accent transition-colors"
+            href="/import"
+            className="flex items-center justify-between rounded-2xl border-[3px] border-cardBorder bg-white px-4 py-3 text-xs font-bold text-[#3F6C74] hover:border-accent transition-colors"
           >
-            <span>除外した記録（{rejectedCount}件）を見る</span>
+            <span>データ登録（CSV・MP3・鳥の写真）</span>
             <span className="text-accentText text-base">›</span>
           </Link>
-        )}
+          {rejectedCount > 0 && (
+            <Link
+              href="/rejected"
+              className="flex items-center justify-between rounded-2xl border-[3px] border-cardBorder bg-white px-4 py-3 text-xs font-bold text-[#3F6C74] hover:border-accent transition-colors"
+            >
+              <span>除外した記録（{rejectedCount}件）を見る</span>
+              <span className="text-accentText text-base">›</span>
+            </Link>
+          )}
+        </div>
       </div>
     </div>
   );
