@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { fetchDetections, fetchBirdImages } from "../lib/queries";
+import { useLoginState } from "../lib/useLoginState";
+import { signOut } from "../lib/auth";
+import LoginPanel from "./LoginPanel";
 import { buildSpeciesList } from "../lib/aggregate";
 import {
   getSessionOrderMap,
@@ -43,7 +47,10 @@ function MinimalThumb({ species: s, onSelect }) {
   );
 }
 
-export default function MinimalHome() {
+// promptLogin: 管理画面（?admin=true）にログイン無しで来たときに、最初からログイン画面を開く
+export default function MinimalHome({ promptLogin = false }) {
+  const login = useLoginState();
+  const [loginOpen, setLoginOpen] = useState(promptLogin);
   const [rawDetections, setRawDetections] = useState([]);
   const [birdImages, setBirdImages] = useState([]);
   const [keyword, setKeyword] = useState("");
@@ -234,13 +241,53 @@ export default function MinimalHome() {
 
       {/* フッター：白い帯にInstagramアイコンと著作権表記 */}
       <div className="relative z-10 w-full bg-white py-6 flex flex-col items-center justify-center gap-3">
-        {isApp && (
-          <button
-            onClick={() => setOfflineOpen(true)}
-            className="text-[11px] text-[#8A8A8A] hover:text-[#555] underline underline-offset-2 transition-colors"
-          >
-            オフライン保存
-          </button>
+        {/* ログインの有無で、使えるものを分ける（ログイン中だけ、緯度経度・地図・管理画面・オフライン保存） */}
+        {login.ready && (
+          <div className="w-full px-4 flex flex-col items-center gap-2 text-[11px] text-[#8A8A8A]">
+            {login.loggedIn ? (
+              <>
+                {/* 1行目：ログイン中に使える機能。項目の途中で折り返さない（whitespace-nowrap）。
+                    幅が足りなければ、項目ごとに次の行へ回る */}
+                <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
+                  <Link
+                    href="/admin"
+                    className="whitespace-nowrap hover:text-[#555] underline underline-offset-2 transition-colors"
+                  >
+                    観測地点・観測日・地図
+                  </Link>
+                  {isApp && (
+                    <button
+                      onClick={() => setOfflineOpen(true)}
+                      className="whitespace-nowrap hover:text-[#555] underline underline-offset-2 transition-colors"
+                    >
+                      オフライン保存
+                    </button>
+                  )}
+                </div>
+                {/* 2行目：ログインの状態 */}
+                <div className="flex items-center justify-center gap-3">
+                  <span className="whitespace-nowrap">ログイン中</span>
+                  <span aria-hidden="true">・</span>
+                  <button
+                    onClick={async () => {
+                      setOfflineOpen(false);
+                      await signOut();
+                    }}
+                    className="whitespace-nowrap hover:text-[#555] underline underline-offset-2 transition-colors"
+                  >
+                    ログアウト
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                onClick={() => setLoginOpen(true)}
+                className="whitespace-nowrap hover:text-[#555] underline underline-offset-2 transition-colors"
+              >
+                ログイン
+              </button>
+            )}
+          </div>
         )}
         <a
           href="https://www.instagram.com/hideharu.sasa?igsh=Y2Z6c2h5Nmd2Zm5u&utm_source=qr"
@@ -277,13 +324,19 @@ export default function MinimalHome() {
         onClose={() => setSelectedSpecies(null)}
       />
 
-      {isApp && (
+      {isApp && login.loggedIn && (
         <OfflineSavePanel
           open={offlineOpen}
           onClose={() => setOfflineOpen(false)}
           onChanged={loadData}
         />
       )}
+
+      <LoginPanel
+        open={loginOpen && !login.loggedIn}
+        onClose={() => setLoginOpen(false)}
+        notice={promptLogin ? "観測地点・観測日・地図の画面は、ログインが必要です。" : null}
+      />
     </div>
   );
 }

@@ -133,6 +133,9 @@ export default function AdminHome() {
       <div className="w-full max-w-sm bg-page rounded-[28px] border-[6px] border-white shadow-xl overflow-hidden">
         {/* ヘッダーバナー */}
         <div className="bg-header px-6 pt-6 pb-6 rounded-b-3xl">
+          <Link href="/" className="block mb-2 text-xs font-bold text-[#3F6C74]">
+            ‹ ホームへ戻る
+          </Link>
           <h1 className="font-display text-[#5C5750] text-2xl">
             🎧 Ambient Bird Log 🐦
           </h1>
