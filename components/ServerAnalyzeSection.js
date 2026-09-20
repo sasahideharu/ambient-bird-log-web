@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { uploadMp3Files, runImport, fetchExistingRecords, compareWithExisting } from "../lib/importData";
 import { analyzeMp3Files } from "../lib/analyzerClient";
+import { prepareWav, isWavName } from "../lib/wavPrepare";
+import { uploadAnalysisWavs, deleteAnalysisWavs } from "../lib/analysisWav";
 import RegisteredEditList from "./RegisteredEditList";
 
 const cardClass = "bg-white border-[3px] border-cardBorder rounded-2xl p-4";
@@ -22,15 +24,26 @@ const MIN_CONF_OPTIONS = [
 
 const STAGE_LABEL = {
   mp3: "MP3を保存中",
+  wav: "解析用のWAVを保存中",
   analyze: "サーバーで解析中",
+  cleanup: "解析用のWAVを消しています",
   records: "記録を登録中",
 };
 
-// 🔥 「サーバーで解析」（管理者だけ）。MP3 だけ選ぶと、サーバー（BirdNET）が解析して、結果を返す。
-//    流れ：MP3を保存 → 解析 → 結果と既存の記録との比較を確認 → 「記録を登録」
+const mb = (bytes) => (bytes / 1048576).toFixed(1);
+const inputLabel = (kind) => (kind === "wav" ? "wav-48k-16bit" : "mp3"); // 解析した音の種類（記録の analysis_params に残す）
+
+// 🔥 「サーバーで解析」（管理者だけ）。MP3 か WAV を選ぶと、サーバー（BirdNET）が解析して、結果を返す。
+//    流れ：（WAV は、この画面の中で 48kHz・16bit に変換）→ 保存 → 解析 → 結果と既存の記録との比較を確認 → 「記録を登録」
+//    ・MP3：解析の前に、保管場所に保存して、それを解析する（これまでどおり）
+//    ・WAV：解析用の WAV（48kHz・16bit）を一時的に保存して解析し、解析のあとで消す。再生用の MP3 は、「記録を登録」のときに保存する
 //    location：{ name, latitude, longitude, valid }（上の「場所」で指定したもの）
 export default function ServerAnalyzeSection({ location, onRegistered }) {
-  const [mp3Files, setMp3Files] = useState([]);
+  // 選んだファイルは、変換のあと、items になる：{ name（登録する MP3 の名前）, kind："mp3"｜"wav", mp3File, wavFile（WAV のときだけ）, info }
+  const [items, setItems] = useState([]);
+  const [convert, setConvert] = useState(null); // WAV の変換中：{ done, total }
+  const [convertErrors, setConvertErrors] = useState([]); // 変換できなかったもの：[{ name, message }]
+  const pickToken = useRef(0);
   const [inputKey, setInputKey] = useState(0);
   const [minConf, setMinConf] = useState("0.25");
   const [useFilter, setUseFilter] = useState(true); // 場所＋時期で、鳥を絞り込む（標準：オン）
@@ -41,15 +54,66 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState(null);
   const [registerResult, setRegisterResult] = useState(null);
+  const [cleanupWarning, setCleanupWarning] = useState(null); // 解析用の WAV を消せなかったとき
 
   // 選び直したり、設定・場所の座標を変えたら、前の解析結果は使えない（もう一度、解析する）
   useEffect(() => {
     setAnalysis(null);
     setError(null);
-  }, [mp3Files, minConf, useFilter, stereoBest, location.latitude, location.longitude]);
+  }, [items, minConf, useFilter, stereoBest, location.latitude, location.longitude]);
 
-  const invalidNames = useMemo(() => mp3Files.map((f) => f.name).filter((n) => !VALID_MP3_NAME.test(n)), [mp3Files]);
-  const canAnalyze = mp3Files.length > 0 && invalidNames.length === 0 && !!location.name.trim() && location.valid && phase === "idle";
+  const invalidNames = useMemo(() => items.map((i) => i.name).filter((n) => !VALID_MP3_NAME.test(n)), [items]);
+  const duplicateNames = useMemo(() => {
+    const seen = new Set();
+    const dup = new Set();
+    for (const i of items) (seen.has(i.name) ? dup : seen).add(i.name);
+    return [...dup];
+  }, [items]);
+  const hasWav = items.some((i) => i.kind === "wav");
+  const canAnalyze =
+    items.length > 0 &&
+    invalidNames.length === 0 &&
+    duplicateNames.length === 0 &&
+    convertErrors.length === 0 &&
+    !convert &&
+    !!location.name.trim() &&
+    location.valid &&
+    phase === "idle";
+
+  // ファイルを選んだ：WAV は、この画面の中で、解析用の WAV（48kHz・16bit）と、再生用の MP3 に変換する（1本ずつ）
+  async function handlePick(fileList) {
+    const token = ++pickToken.current;
+    setRegisterResult(null);
+    setCleanupWarning(null);
+    setItems([]);
+    setConvertErrors([]);
+    const total = fileList.filter((f) => isWavName(f.name)).length;
+    setConvert(total > 0 ? { done: 0, total } : null);
+    const out = [];
+    const errors = [];
+    let done = 0;
+    for (const f of fileList) {
+      if (isWavName(f.name)) {
+        await new Promise((r) => setTimeout(r, 20)); // 「変換中」の表示を先に出す
+        try {
+          const p = await prepareWav(f);
+          out.push({ name: p.name, kind: "wav", mp3File: p.mp3File, wavFile: p.wavFile, info: p.info });
+        } catch (err) {
+          console.error(err);
+          errors.push({ name: f.name, message: err?.message ?? String(err) });
+        }
+        done++;
+        if (pickToken.current !== token) return;
+        setConvert({ done, total });
+      } else {
+        out.push({ name: f.name, kind: "mp3", mp3File: f });
+      }
+    }
+    if (pickToken.current !== token) return;
+    setConvert(null);
+    setItems(out);
+    setConvertErrors(errors);
+  }
 
   // 解析結果 → 登録する記録
   const { records, errorFiles, speciesCount } = useMemo(() => {
@@ -61,7 +125,9 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
         errs.push(name);
         continue;
       }
-      for (const r of res.rows) recs.push({ wav_filename: name, ...r });
+      // 各記録に、解析した音の種類（wav-48k-16bit／mp3）つきの設定を持たせる
+      const params = { ...analysis.meta.params, input: analysis.inputs?.[name] ?? "mp3" };
+      for (const r of res.rows) recs.push({ wav_filename: name, ...r, analysis_params: params });
     }
     return { records: recs, errorFiles: errs, speciesCount: new Set(recs.map((r) => r.scientific_name)).size };
   }, [analysis]);
@@ -71,26 +137,58 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
     setError(null);
     setAnalysis(null);
     setRegisterResult(null);
+    setCleanupWarning(null);
+    const wavItems = items.filter((i) => i.kind === "wav");
+    const mp3Items = items.filter((i) => i.kind === "mp3");
+    const uploadedWavs = [];
     try {
-      const failed = await uploadMp3Files(mp3Files, setProgress);
+      // MP3 は、解析の前に保存して、それを解析する（これまでどおり）
+      const failed = await uploadMp3Files(mp3Items.map((i) => i.mp3File), setProgress);
       if (failed.length > 0) {
         throw new Error(`MP3 の保存に失敗しました：${failed.map((f) => `${f.name}（${f.message}）`).join("、")}`);
       }
-      const names = mp3Files.map((f) => f.name);
+      // WAV は、解析用（48kHz・16bit）を、一時的に保存する（解析のあとで消す。失敗したものも、念のため、消す対象に入れる）
+      uploadedWavs.push(...wavItems.map((i) => i.wavFile.name));
+      const failedWav = await uploadAnalysisWavs(wavItems.map((i) => i.wavFile), setProgress);
+      if (failedWav.length > 0) {
+        throw new Error(`解析用の WAV の保存に失敗しました：${failedWav.map((f) => `${f.name}（${f.message}）`).join("、")}`);
+      }
+
+      const analysisName = (i) => (i.kind === "wav" ? i.wavFile.name : i.name); // サーバーに解析してもらう名前
       const a = await analyzeMp3Files({
-        names,
+        names: items.map(analysisName),
         minConf: Number(minConf),
         location: useFilter ? { lat: location.latitude, lon: location.longitude } : null,
         useWeek: useFilter,
         stereo: stereoBest ? "best" : "mix",
         onProgress: setProgress,
       });
+      // 結果の名前を、登録する MP3 の名前に直す（WAV の結果は、同じ名前の MP3 の記録として登録する）
+      const results = {};
+      let warnings = a.warnings;
+      for (const i of items) {
+        results[i.name] = a.results[analysisName(i)];
+        if (i.kind === "wav") warnings = warnings.map((w) => w.replace(i.wavFile.name, i.name));
+      }
+      const names = items.map((i) => i.name);
+      const inputs = Object.fromEntries(items.map((i) => [i.name, inputLabel(i.kind)]));
       const existing = await fetchExistingRecords(names);
-      setAnalysis({ ...a, compare: compareWithExisting(a.results, existing), names });
+      setAnalysis({ ...a, results, warnings, inputs, compare: compareWithExisting(results, existing), names });
     } catch (err) {
       console.error(err);
       setError(err?.message ?? String(err));
     } finally {
+      // 解析用の WAV は、解析のあと（失敗したときも）で、消す
+      if (uploadedWavs.length > 0) {
+        setProgress({ stage: "cleanup", done: 0, total: uploadedWavs.length });
+        try {
+          const left = await deleteAnalysisWavs(uploadedWavs);
+          if (left.length > 0) setCleanupWarning(`解析用の WAV を消せませんでした（${left.join("、")}）。Supabase の画面（Storage → bird-wav）で消してください。`);
+        } catch (err) {
+          console.error(err);
+          setCleanupWarning(`解析用の WAV を消せませんでした（${uploadedWavs.join("、")}）。Supabase の画面（Storage → bird-wav）で消してください。`);
+        }
+      }
       setPhase("idle");
       setProgress(null);
     }
@@ -101,7 +199,8 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
     setError(null);
     try {
       const res = await runImport({
-        mp3Files: [], // MP3 は、解析の前に保存済み
+        // MP3 は、解析の前に保存済み。WAV から作った再生用の MP3 は、ここで保存する（記録より先に保存し、失敗したら、記録は登録しない）
+        mp3Files: items.filter((i) => i.kind === "wav").map((i) => i.mp3File),
         records,
         location: { name: location.name.trim(), latitude: location.latitude, longitude: location.longitude },
         onProgress: setProgress,
@@ -109,7 +208,6 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
           model_name: analysis.meta.model_name,
           model_version: analysis.meta.model_version,
           analyzed_at: analysis.meta.analyzed_at,
-          analysis_params: analysis.meta.params,
         },
       });
       // 登録した録音の一覧（登録後に、そこから編集できるようにする）。記録が無かった録音は、場所が分からず、公開できないので入れない
@@ -118,7 +216,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
         .filter((f) => f.rows.length > 0);
       setRegisterResult(res.ok ? { ...res, files } : res);
       if (res.ok) {
-        setMp3Files([]);
+        setItems([]);
         setInputKey((k) => k + 1);
         onRegistered?.();
       }
@@ -138,32 +236,62 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
       <div className={cardClass}>
         <div className="text-xs font-bold text-ink mb-1">🖥 サーバーで解析</div>
         <p className="text-[11px] text-inkMuted leading-relaxed mb-3">
-          MP3 だけ選ぶと、サーバー（BirdNET）が解析します。CSV は要りません。先に、上の「場所」を指定してください。
+          MP3 か WAV を選ぶと、サーバー（BirdNET）が解析します。CSV は要りません。先に、上の「場所」を指定してください。
+          WAV（192kHz・32bit でも可）は、この画面の中で、48kHz・16bit に変換してから使います（元の WAV は、どこにも送りません。解析のときだけ、変換した WAV を一時的に保存して、解析のあとで消します）。
         </p>
         <label className={pickButtonClass}>
-          MP3を選ぶ
+          MP3・WAVを選ぶ
           <input
             key={inputKey}
             type="file"
             multiple
-            accept=".mp3,audio/mpeg"
+            accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav"
             className="hidden"
-            disabled={busy}
-            onChange={(e) => {
-              setMp3Files([...e.target.files]);
-              setRegisterResult(null);
-            }}
+            disabled={busy || !!convert}
+            onChange={(e) => handlePick([...e.target.files])}
           />
         </label>
-        {mp3Files.length > 0 && (
+        {convert && (
+          <p className="mt-2 text-[11px] text-inkMuted leading-relaxed">
+            WAV を変換中：{convert.done} / {convert.total}（1本あたり、数秒かかります）
+          </p>
+        )}
+        {items.length > 0 && (
           <div className="mt-2 text-[11px] text-inkMuted leading-relaxed break-all">
-            {mp3Files.length}個：{mp3Files.slice(0, 4).map((f) => f.name).join("、")}
-            {mp3Files.length > 4 && ` ほか${mp3Files.length - 4}個`}
+            <div>
+              {items.length}個{hasWav ? `（WAV ${items.filter((i) => i.kind === "wav").length}個を変換済み）` : ""}
+            </div>
+            <ul className="mt-1 flex flex-col gap-0.5">
+              {items.slice(0, 4).map((i) => (
+                <li key={i.name}>
+                  {i.name}
+                  {i.kind === "wav" &&
+                    `（元：${i.info.originalName}・${(i.info.originalRate / 1000).toFixed(0)}kHz・${i.info.originalBits}bit・${
+                      i.info.channels === 2 ? "ステレオ" : "モノラル"
+                    }・${i.info.durationSec.toFixed(1)}秒・${mb(i.info.originalBytes)}MB → 解析用 ${mb(i.info.wavBytes)}MB・MP3 ${mb(i.info.mp3Bytes)}MB・時刻：${i.info.timeSource}）`}
+                </li>
+              ))}
+              {items.length > 4 && <li>ほか{items.length - 4}個</li>}
+            </ul>
           </div>
+        )}
+        {convertErrors.length > 0 && (
+          <ul className="mt-2 text-[11px] text-red-500 leading-relaxed break-all">
+            {convertErrors.map((e) => (
+              <li key={e.name}>
+                {e.name}：{e.message}
+              </li>
+            ))}
+          </ul>
         )}
         {invalidNames.length > 0 && (
           <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
             使えない名前があります（英数字・「.」「_」「-」だけ、拡張子は小文字の .mp3）：{invalidNames.join("、")}
+          </p>
+        )}
+        {duplicateNames.length > 0 && (
+          <p className="mt-2 text-[11px] text-red-500 leading-relaxed">
+            同じ名前になるファイルがあります（WAV と MP3 の両方を選んでいないか、確認してください）：{duplicateNames.join("、")}
           </p>
         )}
 
@@ -203,7 +331,7 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
           disabled={!canAnalyze}
           className="mt-4 w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-3 disabled:opacity-40"
         >
-          {phase === "working" ? "解析中…" : "MP3を保存して解析する"}
+          {phase === "working" ? "解析中…" : hasWav ? "変換した WAV を解析する" : "MP3を保存して解析する"}
         </button>
         {phase === "working" && progress && (
           <p className="mt-2 text-center text-[11px] text-inkMuted leading-relaxed">
@@ -211,10 +339,11 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
             {progress.stage === "analyze" && "（初回は、サーバーの起動に1分ほどかかります）"}
           </p>
         )}
-        {!busy && mp3Files.length > 0 && !(location.name.trim() && location.valid) && (
+        {!busy && items.length > 0 && !(location.name.trim() && location.valid) && (
           <p className="mt-2 text-center text-[11px] text-red-500">上の「場所」の名前と緯度経度を指定してください。</p>
         )}
         {error && <p className="mt-2 text-[11px] text-red-500 leading-relaxed break-all">{error}</p>}
+        {cleanupWarning && <p className="mt-2 text-[11px] text-red-500 leading-relaxed break-all">⚠ {cleanupWarning}</p>}
       </div>
 
       {analysis && (
@@ -300,6 +429,8 @@ export default function ServerAnalyzeSection({ location, onRegistered }) {
           )}
           <p className="mt-2 text-[10px] text-inkMuted leading-relaxed">
             登録すると、同じ記録は上書きされます（消す機能はありません）。各記録に、モデル名・バージョン・解析日時・設定が残ります。
+            {analysis && Object.values(analysis.inputs ?? {}).includes("wav-48k-16bit") &&
+              "WAV から変換した再生用の MP3 も、このとき保存します（同じ名前の MP3 は、上書きされます）。"}
           </p>
         </div>
       )}

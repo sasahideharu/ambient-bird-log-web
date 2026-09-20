@@ -1,10 +1,11 @@
-"""Ambient Bird Log の解析サーバー（Modal）。BirdNET で MP3 を解析して、結果（3秒ごとの記録）を返す。
+"""Ambient Bird Log の解析サーバー（Modal）。BirdNET で MP3・WAV を解析して、結果（3秒ごとの記録）を返す。
 
 ・このサーバーは、記録を書き込まない（データベースの鍵も持たない）。解析して、結果を返すだけ。
   書き込みは、画面（ログイン中の管理者）が、自分の権限で行う（データベース側で「管理者名簿にいる人だけ」に制限済み）
 ・呼び出せるのは、ログイン中の管理者だけ。ログインのトークン（Supabase）と、管理者名簿で確認する。
   確認は、軽い「門番」の関数で行い、通ったときだけ、重い解析の関数を動かす（不正な呼び出しで、重い処理が動かないように）
-・解析するファイルは、保管場所（bird-wav）の MP3。名前で指定する（ファイルそのものは受け取らない）
+・解析するファイルは、保管場所（bird-wav）の MP3 か WAV。名前で指定する（ファイルそのものは受け取らない）
+  WAV は、画面（ブラウザ）が、48kHz・16bit に変換して、一時的に保存したもの（解析が終わったら、画面が消す）
 
 デプロイ（公開）: server/.venv/bin/python -m modal deploy server/analyzer_app.py
 試験（何も書き込まない）: server/.venv/bin/python -m modal run server/analyzer_app.py::selftest
@@ -31,7 +32,7 @@ ALLOWED_ORIGINS = [
 ]
 
 MAX_FILES_PER_REQUEST = 10  # 1回の呼び出しで解析する MP3 の数（門番のタイムアウトに収めるため）
-MAX_FILE_BYTES = 20 * 1024 * 1024  # 1ファイルの大きさの上限（MP3 は通常 0.3MB 前後）
+MAX_FILE_BYTES = 20 * 1024 * 1024  # 1ファイルの大きさの上限（MP3 は通常 0.3〜1MB・48kHz/16bit のステレオ WAV は 1秒 約0.19MB＝約100秒まで）
 
 # ---------- 実行環境（画像） ----------
 # 解析用：BirdNET（TensorFlow）と、モデル本体（初回に約224MBをダウンロードするため、画像を作るときに1回動かして、中に入れておく）
@@ -120,10 +121,10 @@ def week_from_filename(name: str):
 # ---------- 重い解析（BirdNET） ----------
 @app.function(image=analysis_image, cpu=2, memory=4096, timeout=600)
 def analyze_batch(request: dict) -> dict:
-    """MP3（名前で指定）を、BirdNET で解析して、結果を返す。何も書き込まない。
+    """MP3・WAV（名前で指定）を、BirdNET で解析して、結果を返す。何も書き込まない。
 
     request:
-      files:      MP3 の名前の一覧（保管場所 bird-wav にあるもの）
+      files:      MP3・WAV の名前の一覧（保管場所 bird-wav にあるもの。拡張子は小文字の .mp3 か .wav）
       min_conf:   信頼度の下限（標準 0.25）
       location:   {"lat": 緯度, "lon": 経度} … 場所の絞り込み。None なら絞り込みなし
       use_week:   True なら、録音の日付（ファイル名の YYMMDD）から週を求めて、時期でも絞り込む
@@ -154,7 +155,7 @@ def analyze_batch(request: dict) -> dict:
     results = {}
     warnings = []
 
-    # ① 保管場所から MP3 を取ってくる
+    # ① 保管場所から MP3・WAV を取ってくる
     groups = {}  # 週 → [ファイル名]（同じ週のものは、まとめて解析する）
     channel_info = {}  # ファイル名 → { channels：チャンネル数, derived：左右を分けて作ったチャンネルの印（"L"・"R"） }
     for name in files:
@@ -301,7 +302,7 @@ def web():
     def analyze(req: AnalyzeRequest, authorization: str | None = Header(default=None), apikey: str | None = Header(default=None)):
         require_admin(authorization, apikey)
         for name in req.files:
-            if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}\.mp3", name):
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}\.(mp3|wav)", name):
                 raise HTTPException(status_code=400, detail=f"ファイル名を使えません: {name}")
         return analyze_batch.remote(req.model_dump())
 
