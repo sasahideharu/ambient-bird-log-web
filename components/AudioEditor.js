@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { computeSpectrogram, drawSpectrogram } from "../lib/spectrogram";
-import { renderFocused, focusGainDb, suggestBand, DEFAULT_FOCUS } from "../lib/audioFocus";
+import {
+  renderFocused,
+  focusGainDb,
+  suggestBand,
+  DEFAULT_FOCUS,
+  steepFromPercent,
+  percentFromSteep,
+} from "../lib/audioFocus";
+import { encodeWav } from "../lib/wav";
 
 const MAX_FREQ_HZ = 13500; // スペクトログラムの上限（AudioSpectrogramCard と同じ）
 const CANVAS_H = 300;
@@ -65,6 +73,22 @@ function hintFor(h) {
   return h.hy === "t" ? "上の辺をドラッグ：周波数の上限を変える" : "下の辺をドラッグ：周波数の下限を変える";
 }
 
+// 角丸の四角（古い iPhone の Safari には、標準の roundRect が無いため、自前で描く）
+function roundedRect(g, x, y, w, h, r) {
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+
+// スライダーの、選んだ所までの色
+function sliderBackground(value, min, max) {
+  const pct = ((value - min) / (max - min)) * 100;
+  return `linear-gradient(to right, #8FC2CB ${pct}%, #E9E6E1 ${pct}%)`;
+}
+
 function drawMoveIcon(g, cx, cy, r, on) {
   g.fillStyle = "rgba(20,30,35,0.8)";
   g.beginPath();
@@ -106,7 +130,7 @@ function drawHandles(g, x0, y0, x1, y1, hl, coarse) {
       const horizontal = !h.hx; // 上下の辺の中央
       const w = (horizontal ? 24 : 9) * k;
       const hgt = (horizontal ? 9 : 24) * k;
-      g.roundRect(h.x - w / 2, h.y - hgt / 2, w, hgt, 4);
+      roundedRect(g, h.x - w / 2, h.y - hgt / 2, w, hgt, 4);
     }
     g.fill();
     g.stroke();
@@ -129,6 +153,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   const [loop, setLoop] = useState(false);
   const [playing, setPlaying] = useState(null); // { kind, id }
   const [busy, setBusy] = useState(false);
+  const [playError, setPlayError] = useState(null);
   const [hover, setHover] = useState(null); // マウスを乗せている部分 { id, type, hx, hy, handle }
   const [drag, setDrag] = useState(null); // 操作中の部分 { id, type, hx, hy, handle }
   const [coarse, setCoarse] = useState(false); // 指で操作する端末（点を大きくする）
@@ -140,7 +165,9 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   const specRef = useRef(null);
   const overlayRef = useRef(null);
   const graphRef = useRef(null);
-  const ctxRef = useRef(null);
+  const audioElRef = useRef(null); // 再生用の <audio>（iPhone の消音スイッチの影響を受けない）
+  const blobUrlRef = useRef(null); // 加工した音（WAV）の、いまの URL
+  const silentUrlRef = useRef(null); // 「押した瞬間に、再生を始めておく」ための、無音の WAV の URL
   const playRef = useRef(null);
   const rafRef = useRef(null);
   const cacheRef = useRef(new Map());
@@ -173,11 +200,10 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
         } else {
           throw new Error("音声が指定されていません");
         }
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!ctxRef.current) ctxRef.current = new AudioCtx();
-        const buf = await new Promise((resolve, reject) =>
-          ctxRef.current.decodeAudioData(arrayBuffer.slice(0), resolve, reject)
-        );
+        // 読み込み（デコード）だけに使う。本物の AudioContext を作ると、iPhone で、音の出方（消音スイッチ）に影響するため、使わない
+        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const decoder = new Offline(1, 1, 48000);
+        const buf = await new Promise((resolve, reject) => decoder.decodeAudioData(arrayBuffer.slice(0), resolve, reject));
         // モノラルにする（複数チャンネルは平均）
         const mono = new Float32Array(buf.length);
         for (let c = 0; c < buf.numberOfChannels; c++) {
@@ -225,12 +251,9 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   useEffect(
     () => () => {
       cancelAnimationFrame(rafRef.current);
-      try {
-        playRef.current?.source.stop();
-      } catch {
-        // すでに止まっている
-      }
-      ctxRef.current?.close?.();
+      audioElRef.current?.pause();
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      if (silentUrlRef.current) URL.revokeObjectURL(silentUrlRef.current);
     },
     []
   );
@@ -333,10 +356,9 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
 
     // 再生位置
     const p = playRef.current;
-    if (p && ctxRef.current) {
-      let elapsed = ctxRef.current.currentTime - p.startedAt;
-      if (p.loop) elapsed = elapsed % p.dur;
-      const x = toX(p.t0 + elapsed);
+    const el = audioElRef.current;
+    if (p && el) {
+      const x = toX(p.t0 + el.currentTime);
       g.strokeStyle = "#8FC2CB";
       g.lineWidth = 2;
       g.beginPath();
@@ -362,7 +384,7 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.fillStyle = "#faf9f7";
     g.fillRect(0, 0, w, h);
-    const maxDb = 90;
+    const maxDb = 120;
     const band = { fLo: active.fLo, fHi: active.fHi, topHz };
     g.fillStyle = "rgba(143,194,203,0.25)";
     g.fillRect((active.fLo / topHz) * w, 0, ((active.fHi - active.fLo) / topHz) * w, h);
@@ -377,6 +399,18 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
       else g.lineTo(x, y);
     }
     g.stroke();
+    if (active.floorDb != null) {
+      // 「少し残す」の下限
+      const yf = 6 + (-active.floorDb / maxDb) * (h - 12);
+      g.strokeStyle = "rgba(224,138,60,0.9)";
+      g.lineWidth = 1;
+      g.setLineDash([4, 3]);
+      g.beginPath();
+      g.moveTo(0, yf);
+      g.lineTo(w, yf);
+      g.stroke();
+      g.setLineDash([]);
+    }
     g.fillStyle = "#8a857d";
     g.font = "10px sans-serif";
     g.fillText("0dB", 3, 12);
@@ -540,17 +574,9 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   }
 
   function stopPlayback() {
-    const p = playRef.current;
     playRef.current = null;
     cancelAnimationFrame(rafRef.current);
-    if (p) {
-      p.source.onended = null;
-      try {
-        p.source.stop();
-      } catch {
-        // すでに止まっている
-      }
-    }
+    audioElRef.current?.pause();
     setPlaying(null);
   }
 
@@ -559,13 +585,23 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
     rafRef.current = requestAnimationFrame(tick);
   }
 
+  // 🔥 加工した音を WAV にして、<audio> で再生する（Web Audio ではなく）。
+  //    Web Audio は、iPhone の消音スイッチで無音になる／押した後に時間がかかると鳴らないことがある。
+  //    <audio> は、他の再生（録音のカード）と同じように鳴る。
+  //    iPhone は、「押した瞬間」に再生を始めないと、その後の再生を許さないため、
+  //    押した瞬間に、無音のごく短い音を再生しておき、加工が終わってから、本物の音に差し替える
   async function play(kind, s) {
-    const ctx = ctxRef.current;
+    const el = audioElRef.current;
     const a = audioRef.current;
-    if (!ctx || !a) return;
+    if (!el || !a) return;
     stopPlayback();
+    setPlayError(null);
+    if (!silentUrlRef.current) silentUrlRef.current = URL.createObjectURL(encodeWav(new Float32Array(64), 8000));
+    el.loop = false;
+    el.src = silentUrlRef.current;
+    el.play().catch(() => {}); // 押した瞬間に始める（この後、音を差し替えるので、途中で止まる失敗は、無視してよい）
+
     setBusy(true);
-    await ctx.resume();
     await new Promise((r) => setTimeout(r, 20)); // 「加工中」の表示を先に出す
     let samples;
     let t0 = 0;
@@ -580,17 +616,23 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
     }
     setBusy(false);
     if (samples.length === 0) return;
-    const buffer = ctx.createBuffer(1, samples.length, a.sampleRate);
-    buffer.copyToChannel(samples, 0);
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.loop = loop && kind !== "full";
-    source.connect(ctx.destination);
-    source.onended = () => {
-      if (playRef.current?.source === source) stopPlayback();
-    };
-    source.start();
-    playRef.current = { source, startedAt: ctx.currentTime, t0, dur: buffer.duration, loop: source.loop };
+
+    const url = URL.createObjectURL(encodeWav(samples, a.sampleRate));
+    const previous = blobUrlRef.current;
+    blobUrlRef.current = url;
+    el.src = url;
+    el.loop = loop && kind !== "full";
+    el.currentTime = 0;
+    try {
+      await el.play();
+    } catch (err) {
+      console.error(err);
+      setPlayError("再生できませんでした。もう一度、ボタンを押してみてください。（音量や、マナーモードも確認してください）");
+      return;
+    } finally {
+      if (previous) URL.revokeObjectURL(previous);
+    }
+    playRef.current = { kind, t0, loop: el.loop };
     setPlaying({ kind, id: s?.id ?? null });
     rafRef.current = requestAnimationFrame(tick);
   }
@@ -608,9 +650,12 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
   }
 
   const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+  // 「範囲の外を消す強さ」（0〜100%）。steep が無い（古い設定）ときは、標準の強さにする
+  const steepPct = active ? percentFromSteep(active.steep > 0 ? active.steep : DEFAULT_FOCUS.steep) : 0;
 
   return (
     <div className="flex flex-col gap-3">
+      <audio ref={audioElRef} playsInline preload="auto" className="hidden" onEnded={() => playRef.current && stopPlayback()} />
       <div className={cardClass}>
         <div className="text-[11px] text-inkMuted leading-relaxed mb-2">
           スペクトログラム（横＝時間、縦＝周波数）を<b>ドラッグして、範囲を選びます</b>。範囲の中の音を残し、外側の周波数は、遠いほど大きく下げます。範囲は、いくつでも作れます。
@@ -757,67 +802,97 @@ export default function AudioEditor({ src = null, file = null, initialRange = nu
             </label>
             {busy && <span className="text-[11px] text-inkMuted">加工中…</span>}
           </div>
+          {playError && <p className="mt-2 text-[11px] text-red-500 leading-relaxed">{playError}</p>}
 
-          <div className="mt-4 text-[11px] font-bold text-ink">外側の音の下げ方</div>
+          <div className="mt-4 text-[11px] font-bold text-ink">範囲の外の音の消し方</div>
           <canvas ref={graphRef} style={{ width: "100%", height: 90 }} className="mt-1 rounded-lg border-2 border-cardBorder" />
-          <div className="text-[10px] text-inkMuted mt-1">横＝周波数（水色の帯が、残す範囲）／縦＝下げる量（線が下がるほど、小さく聞こえる）</div>
+          <div className="text-[10px] text-inkMuted mt-1 leading-relaxed">
+            横＝周波数（水色の帯が、残す範囲）／縦＝音の大きさの変化（線が下がるほど、小さく聞こえる。オレンジの点線＝「少し残す」の下限）。標準は、範囲の外を、ほぼ無くします。
+          </div>
 
-          <label className="mt-3 block text-[11px] text-ink">
-            一番遠くの音を下げる量：<b>{active.strengthDb}dB</b>
-            <input
-              type="range"
-              min="20"
-              max="90"
-              step="5"
-              value={active.strengthDb}
-              onChange={(e) => updateSelection(active.id, { strengthDb: Number(e.target.value) })}
-              className="abl-slider w-full mt-1 h-1 rounded-full appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, #8FC2CB ${((active.strengthDb - 20) / 70) * 100}%, #E9E6E1 ${((active.strengthDb - 20) / 70) * 100}%)`,
-              }}
-            />
+          <label className="mt-3 block text-[10px] font-bold text-inkMuted">
+            下げ方の基準
+            <select
+              value={active.mode}
+              onChange={(e) => updateSelection(active.id, { mode: e.target.value })}
+              className={`${inputClass} mt-1`}
+            >
+              <option value="ratio">範囲の割合（標準）</option>
+              <option value="octave">オクターブごと</option>
+            </select>
           </label>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-bold text-inkMuted">
-            <label>
-              下げ方の基準
-              <select
-                value={active.mode}
-                onChange={(e) => updateSelection(active.id, { mode: e.target.value })}
-                className={`${inputClass} mt-1`}
-              >
-                <option value="ratio">範囲の割合（標準）</option>
-                <option value="octave">オクターブごと</option>
-              </select>
-            </label>
-            {active.mode === "ratio" ? (
-              <label>
-                近くの音の残り方
-                <select
-                  value={String(active.curve)}
-                  onChange={(e) => updateSelection(active.id, { curve: Number(e.target.value) })}
-                  className={`${inputClass} mt-1`}
-                >
-                  <option value="0.8">すぐ下げる</option>
-                  <option value="1.5">標準</option>
-                  <option value="2.5">近くを残す</option>
-                </select>
-              </label>
-            ) : (
-              <label>
-                1オクターブごとに（dB）
+          {active.mode === "ratio" ? (
+            <>
+              <label className="mt-3 block text-[11px] text-ink">
+                範囲の外を消す強さ：<b>{steepPct}%</b>
                 <input
-                  type="number"
-                  step="6"
-                  min="6"
-                  max="60"
-                  value={active.octaveDb}
-                  onChange={(e) => updateSelection(active.id, { octaveDb: clamp(num(e.target.value, active.octaveDb), 6, 60) })}
-                  className={`${inputClass} mt-1`}
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={steepPct}
+                  onChange={(e) => updateSelection(active.id, { steep: steepFromPercent(Number(e.target.value)) })}
+                  className="abl-slider w-full mt-1 h-1 rounded-full appearance-none cursor-pointer"
+                  style={{ background: sliderBackground(steepPct, 0, 100) }}
                 />
+                <span className="text-[10px] text-inkMuted">
+                  右へ動かすほど、範囲のすぐ外から、一気に小さくなります（グラフの線が、崖のように落ちます）。標準は80%。左へ動かすと、なだらかになります
+                </span>
               </label>
-            )}
-          </div>
+              <details className="mt-3">
+                <summary className="text-[10px] font-bold text-inkMuted cursor-pointer">詳しい設定</summary>
+                <label className="mt-2 block text-[11px] text-ink">
+                  一番遠くの音を下げる量の上限：<b>{Math.min(active.strengthDb, 120)}dB</b>
+                  <input
+                    type="range"
+                    min="20"
+                    max="120"
+                    step="5"
+                    value={Math.min(active.strengthDb, 120)}
+                    onChange={(e) => updateSelection(active.id, { strengthDb: Number(e.target.value) })}
+                    className="abl-slider w-full mt-1 h-1 rounded-full appearance-none cursor-pointer"
+                    style={{ background: sliderBackground(Math.min(active.strengthDb, 120), 20, 120) }}
+                  />
+                </label>
+              </details>
+            </>
+          ) : (
+            <label className="mt-3 block text-[11px] text-ink">
+              境目の急さ：1オクターブ離れるごとに <b>{active.octaveDb}dB</b> 下げる
+              <input
+                type="range"
+                min="12"
+                max="240"
+                step="12"
+                value={active.octaveDb}
+                onChange={(e) => updateSelection(active.id, { octaveDb: Number(e.target.value) })}
+                className="abl-slider w-full mt-1 h-1 rounded-full appearance-none cursor-pointer"
+                style={{ background: sliderBackground(active.octaveDb, 12, 240) }}
+              />
+              <span className="text-[10px] text-inkMuted">大きいほど、範囲の外が、すぐ無くなります（96：範囲の1オクターブ外で、ほぼ無音）</span>
+            </label>
+          )}
+
+          <label className="mt-3 block text-[11px] text-ink">
+            範囲の外を少し残す：<b>{active.floorDb == null ? "無し" : `${active.floorDb}dB`}</b>
+            <input
+              type="range"
+              min="0"
+              max="12"
+              step="1"
+              value={active.floorDb == null ? 0 : Math.round((65 + active.floorDb) / 5)}
+              onChange={(e) => {
+                const pos = Number(e.target.value);
+                updateSelection(active.id, { floorDb: pos === 0 ? null : -(65 - 5 * pos) });
+              }}
+              className="abl-slider w-full mt-1 h-1 rounded-full appearance-none cursor-pointer"
+              style={{ background: sliderBackground(active.floorDb == null ? 0 : Math.round((65 + active.floorDb) / 5), 0, 12) }}
+            />
+            <span className="text-[10px] text-inkMuted">
+              標準は「無し」（範囲の外を、完全に消します）。周りの音も、少し混ぜたいときだけ、右へ動かします（右ほど、多く残ります）
+            </span>
+          </label>
 
           <label className="mt-3 flex items-center gap-2 text-[11px] text-ink">
             <input
