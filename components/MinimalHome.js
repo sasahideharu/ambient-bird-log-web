@@ -294,6 +294,15 @@ function MinimalHomeInner({ promptLogin = false }) {
                       オフライン保存
                     </button>
                   )}
+                  {isApp && (
+                    // 開発中：録音の下見（診断）。録音機能ができたら、録音の入口に置き換える
+                    <Link
+                      href="/diag"
+                      className="whitespace-nowrap hover:text-[#555] underline underline-offset-2 transition-colors"
+                    >
+                      録音の下見
+                    </Link>
+                  )}
                 </div>
                 {/* 2行目：ログインの状態 */}
                 <div className="flex items-center justify-center gap-3">
