@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import BackLink from "./BackLink";
 import RecorderSettingsPanel from "./RecorderSettingsPanel";
+import LiveBirds from "./LiveBirds";
 import { useLoginState } from "../lib/useLoginState";
 import { supabase } from "../lib/supabaseClient";
 import { isNativeApp } from "../lib/offline";
@@ -11,6 +12,11 @@ import { startRecording, MAX_RECORDING_SEC } from "../lib/recorder";
 import { getPosition, loadPlaces, nearestPlace } from "../lib/geo";
 import { loadSettings } from "../lib/recorderSettings";
 import { deviceLabel, getDeviceInfo } from "../lib/deviceInfo";
+import { createLiveAnalysis, warmLiveServer } from "../lib/liveAnalysis";
+import { compactResult, emptyLive, listLive, mergeLive } from "../lib/liveSpecies";
+
+const LIVE_ON_KEY = "abl.recorder.live"; // リアルタイム解析の入・切（この端末だけの設定）
+const WARM_VALID_MS = 4 * 60 * 1000; // サーバーは、最後の呼び出しから5分で眠る。その手前まで、起きているとみなす
 
 const card = "mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4";
 const chip = "inline-flex items-center gap-1 rounded-full border-2 border-cardBorder bg-page px-2.5 py-1 text-[11px] font-bold";
@@ -44,8 +50,16 @@ export default function RecordScreen() {
   const [loc, setLoc] = useState({ status: "checking" });
   const [online, setOnline] = useState(true);
   const [dim, setDim] = useState(false);
+  const [liveOn, setLiveOn] = useState(true);
+  const [liveAgg, setLiveAgg] = useState(emptyLive());
+  const [liveState, setLiveState] = useState(null);
+  const [warm, setWarm] = useState("idle"); // idle | warming | ready | failed（解析サーバーを起こした結果）
   const canvasRef = useRef(null);
   const ctrlRef = useRef(null);
+  const engineRef = useRef(null);
+  const liveOnRef = useRef(true);
+  liveOnRef.current = liveOn;
+  const warmedAtRef = useRef(0);
   const locRef = useRef(loc);
   locRef.current = loc;
   const settingsRef = useRef(settings);
@@ -53,6 +67,11 @@ export default function RecordScreen() {
 
   useEffect(() => {
     setSettings(loadSettings());
+    try {
+      if (localStorage.getItem(LIVE_ON_KEY) === "0") setLiveOn(false);
+    } catch {
+      // 保存された設定が読めなければ、入のまま
+    }
     setOnline(navigator.onLine);
     const on = () => setOnline(true);
     const off = () => setOnline(false);
@@ -63,6 +82,30 @@ export default function RecordScreen() {
       window.removeEventListener("offline", off);
     };
   }, []);
+
+  function toggleLive() {
+    const next = !liveOnRef.current;
+    setLiveOn(next);
+    try {
+      localStorage.setItem(LIVE_ON_KEY, next ? "1" : "0");
+    } catch {
+      // 保存できなくても、今回の録音では、そのまま使える
+    }
+  }
+
+  // 解析サーバーを、先に起こしておく（録音の画面を開いたとき・電波が戻ったとき）。起きるまで、約20秒かかる
+  const wakeServer = useCallback(async () => {
+    if (Date.now() - warmedAtRef.current < WARM_VALID_MS) return;
+    warmedAtRef.current = Date.now();
+    setWarm("warming");
+    const ok = await warmLiveServer();
+    if (!ok) warmedAtRef.current = 0; // 失敗したときは、次の機会に、やり直す
+    setWarm(ok ? "ready" : "failed");
+  }, []);
+
+  useEffect(() => {
+    if (login.loggedIn && liveOn && online) wakeServer();
+  }, [login.loggedIn, liveOn, online, wakeServer]);
 
   // 場所：位置情報（GPS）を取る。取れなければ、デフォルトの場所。近くに、これまでの場所があれば、その名前を提案する
   const refreshLocation = useCallback(async () => {
@@ -122,12 +165,27 @@ export default function RecordScreen() {
     setError(null);
     setResult(null);
     setPhase("starting");
+    setLiveAgg(emptyLive());
+    setLiveState(null);
+    engineRef.current?.stop();
+    const engine = createLiveAnalysis({
+      getLocation: () => (locRef.current.latitude != null ? locRef.current : null),
+      isEnabled: () => liveOnRef.current,
+      onState: setLiveState,
+      onResult: (r) => {
+        setLiveAgg((prev) => mergeLive(prev, r));
+        ctrlRef.current?.addLive(compactResult(r));
+      },
+    });
+    engineRef.current = engine;
     try {
       const { data } = await supabase.auth.getSession();
       const ctrl = await startRecording({
         recorder: { userId: data?.session?.user?.id ?? null, name: settingsRef.current.recorderName },
         location: toMetaLocation(locRef.current),
+        onChunk: engine.push,
         onEnded: (meta) => {
+          engine.stop();
           ctrlRef.current = null;
           setDim(false);
           setResult(meta);
@@ -139,6 +197,7 @@ export default function RecordScreen() {
       setPhase("recording");
     } catch (err) {
       console.error(err);
+      engine.stop();
       setPhase("idle");
       setError(
         err?.name === "NotAllowedError" || err?.name === "SecurityError"
@@ -157,6 +216,7 @@ export default function RecordScreen() {
   // 画面から離れるときに、録音中なら、そこまでを保存して終える
   useEffect(() => {
     return () => {
+      engineRef.current?.stop();
       ctrlRef.current?.stop("画面を閉じた");
     };
   }, []);
@@ -170,6 +230,9 @@ export default function RecordScreen() {
   })();
   const dev = typeof window !== "undefined" ? deviceLabel(getDeviceInfo()) : "";
   const interrupted = live && live.ctxState && live.ctxState !== "running";
+  const liveList = listLive(liveAgg, recording ? elapsed : 1e9);
+  const showLive = recording || liveAgg.windows > 0;
+  const warmText = warm === "warming" ? "☁ 解析サーバーを起こしています…" : warm === "ready" ? "☁ 解析サーバー：準備OK" : warm === "failed" ? "☁ 解析サーバー：つながりません" : null;
 
   return (
     <div className="abl-page-safe min-h-screen w-full flex justify-center bg-page px-6">
@@ -191,6 +254,10 @@ export default function RecordScreen() {
             </span>
             <span className={`${chip} ${online ? "" : "!border-[#C2860A] text-[#C2860A]"}`}>{online ? "📶 電波あり" : "📴 電波なし（録音だけ・あとで解析）"}</span>
             <span className={chip}>📱 {dev}</span>
+            <button onClick={toggleLive} className={`${chip} ${liveOn ? "!border-[#3E9B5F] text-[#2F8050]" : "text-inkMuted"}`}>
+              🔍 リアルタイム解析：{liveOn ? "入" : "切"}
+            </button>
+            {liveOn && warmText && !recording && <span className={`${chip} ${warm === "failed" ? "!border-[#C2860A] text-[#C2860A]" : ""}`}>{warmText}</span>}
           </div>
           {!recording && loc.status !== "checking" && loc.status !== "gps" && loc.message && <p className="mt-2 text-[10px] text-[#C2860A] leading-relaxed">位置情報：{loc.message}。{loc.status === "none" ? "設定で、デフォルトの場所を入れると、それを使います。" : ""}</p>}
           {!recording && (
@@ -230,6 +297,7 @@ export default function RecordScreen() {
                 {live?.writeError && <p className="mt-2 rounded-lg bg-[#FDEAEA] p-2 text-[10px] leading-relaxed text-red-500">端末に書き込めていません。容量を確認してください。</p>}
               </>
             )}
+            {showLive && <LiveBirds list={liveList} state={liveState} enabled={liveOn} finished={!recording} />}
             {error && <p className="mt-2 text-[11px] text-red-500 leading-relaxed">{error}</p>}
 
             <button
