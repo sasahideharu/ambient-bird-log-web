@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchSpeciesDetail } from "../lib/speciesDetail";
 import { getAudioUrl } from "../lib/queries";
 import MinimalSpectrogramToggle from "./MinimalSpectrogramToggle";
 import VerifyControl from "./VerifyControl";
 import { useLoginState } from "../lib/useLoginState";
+import { editedFirst, isEditedRecord, usePaged, PAGE_SIZE } from "../lib/usePaged";
 
 const CONFIDENCE_DEFAULT = 60;
 
@@ -56,15 +57,24 @@ export default function MinimalBirdModal({ speciesName, onClose, onChanged }) {
     onChanged?.();
   }, [speciesName, onChanged]);
 
-  if (!speciesName) return null;
+  // 🔥 信頼度60%以上だけを対象に、信頼度が高い順（同着は新しい記録を上に）で並べる。
+  //    ただし、編集して公開した録音の記録は、いちばん上に。さらに、編集済みで、かつ、確認済み（確定・修正）の記録は、
+  //    信頼度が60%未満でも出す。最初は5件だけ出して、「さらに表示」で5件ずつ足す
+  const records = useMemo(
+    () =>
+      detail
+        ? editedFirst(
+            detail.records
+              .filter((r) => r.confidence >= CONFIDENCE_DEFAULT || (isEditedRecord(r) && r.verification))
+              .slice()
+              .sort((a, b) => b.confidence - a.confidence)
+          )
+        : [],
+    [detail]
+  );
+  const { shown, remaining, showMore } = usePaged(records, speciesName);
 
-  // 🔥 信頼度60%以上だけを対象に、信頼度が高い順（同着は新しい記録を上に）で並べる
-  const records = detail
-    ? detail.records
-        .filter((r) => r.confidence >= CONFIDENCE_DEFAULT)
-        .slice()
-        .sort((a, b) => b.confidence - a.confidence)
-    : [];
+  if (!speciesName) return null;
 
   return (
     <div
@@ -124,7 +134,7 @@ export default function MinimalBirdModal({ speciesName, onClose, onChanged }) {
 
             {/* スクロール領域：音声データだけがここで動く */}
             <div className="flex-1 overflow-y-auto px-6 pb-10 flex flex-col gap-7">
-              {records.map((r) => {
+              {shown.map((r) => {
                 const caption = [formatMonthYear(r.isoDate), r.location]
                   .filter(Boolean)
                   .join(" · ");
@@ -146,6 +156,14 @@ export default function MinimalBirdModal({ speciesName, onClose, onChanged }) {
                   </div>
                 );
               })}
+              {remaining > 0 && (
+                <button
+                  onClick={showMore}
+                  className="mx-auto rounded-full border border-white/30 bg-white/10 px-6 py-2.5 text-xs font-bold text-white/80 active:bg-white/20"
+                >
+                  さらに表示（あと{remaining}件・{Math.min(PAGE_SIZE, remaining)}件ずつ）
+                </button>
+              )}
             </div>
           </div>
         )}

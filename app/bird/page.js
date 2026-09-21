@@ -9,6 +9,7 @@ import AudioSpectrogramCard from "../../components/AudioSpectrogramCard";
 import { useSystemBars } from "../../lib/useSystemBars";
 import { useLoginState } from "../../lib/useLoginState";
 import VerifyControl from "../../components/VerifyControl";
+import { editedFirst, usePaged, PAGE_SIZE } from "../../lib/usePaged";
 
 const PLACEHOLDER_COLOR = "#F6E1E4";
 const PLACEHOLDER_EMOJI = "🐦";
@@ -47,10 +48,12 @@ function BirdDetailInner() {
     load();
   }, [commonName, reloadKey]);
 
+  // 編集して公開した録音の記録は、いちばん上に。最初は5件だけ出して、「さらに表示」で5件ずつ足す
   const visibleRecords = useMemo(() => {
     if (!bird) return [];
-    return bird.records.filter((r) => r.confidence >= minConfidence);
+    return editedFirst(bird.records.filter((r) => r.confidence >= minConfidence));
   }, [bird, minConfidence]);
+  const { shown, remaining, showMore } = usePaged(visibleRecords, commonName);
 
   const avgConfidence = useMemo(() => {
     if (!bird || bird.records.length === 0) return 0;
@@ -158,7 +161,7 @@ function BirdDetailInner() {
             </div>
 
             <div className="px-4 pb-5 flex flex-col gap-3">
-              {visibleRecords.map((r) => {
+              {shown.map((r) => {
                 const audioUrl = getAudioUrl(r.wavFilename);
                 return (
                   <div key={r.id} className="bg-white border-[3px] border-cardBorder rounded-2xl p-3.5">
@@ -200,6 +203,14 @@ function BirdDetailInner() {
                 <div className="text-center text-xs text-inkMuted py-6">
                   この信頼度以上の記録は見つかりませんでした
                 </div>
+              )}
+              {remaining > 0 && (
+                <button
+                  onClick={showMore}
+                  className="mx-auto rounded-full border-[3px] border-cardBorder bg-white px-6 py-2.5 text-xs font-bold text-[#3F6C74] hover:border-accent"
+                >
+                  さらに表示（あと{remaining}件・{Math.min(PAGE_SIZE, remaining)}件ずつ）
+                </button>
               )}
             </div>
           </>
