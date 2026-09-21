@@ -6,6 +6,7 @@ import BackLink from "./BackLink";
 import { captureSupport, startPcmCapture } from "../lib/pcmCapture";
 import { LiveSpectrogram } from "../lib/liveSpectrogram";
 import { startSilentAudio } from "../lib/keepAlive";
+import { encodeWav } from "../lib/wav";
 
 const card = "mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4";
 const btn = "w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-3 disabled:opacity-40";
@@ -90,7 +91,18 @@ async function decodeRecorder(blobs, mime, startSec, hiddenIntervals) {
       if (inHidden(t)) hidden.push(db);
       else if (inVisible(t)) visible.push(db);
     });
-    return { durationSec: Math.round(buf.duration * 10) / 10, sampleRate: sr, hiddenAvgDb: mean(hidden), hiddenSeconds: hidden.length, visibleAvgDb: mean(visible), visibleSeconds: visible.length, perSecondDb: perSec };
+    return {
+      durationSec: Math.round(buf.duration * 10) / 10,
+      sampleRate: sr,
+      hiddenAvgDb: mean(hidden),
+      hiddenSeconds: hidden.length,
+      visibleAvgDb: mean(visible),
+      visibleSeconds: visible.length,
+      // 1秒ごとの大きさは、短いテストだけ（長いと、結果の文章が長くなりすぎる）
+      perSecondDb: perSec.length <= 90 ? perSec : undefined,
+      minDb: perSec.length ? Math.min(...perSec) : null,
+      maxDb: perSec.length ? Math.max(...perSec) : null,
+    };
   } catch (err) {
     return { error: `解読できませんでした（${err?.message ?? err}）` };
   }
@@ -132,6 +144,8 @@ export default function RecordingDiag() {
   const [level, setLevel] = useState(null);
   const [copied, setCopied] = useState(false);
   const [events, setEvents] = useState([]); // 出来事の記録（画面を消す・マイクが止まる、など）
+  const [testSec, setTestSec] = useState(60); // 画面を消すテストの長さ（秒）
+  const urlsRef = useRef([]); // 聞くための一時的な URL（次のテストのときに、片づける）
   const [keepAlive, setKeepAlive] = useState("none"); // 画面を消しても、音の処理を続けさせる工夫：none | audio | noise | both
   const canvasRef = useRef(null);
   const levelRef = useRef({ rms: -120, peak: -120 });
@@ -361,6 +375,25 @@ export default function RecordingDiag() {
     if (bgMode && mrBlobs.length) {
       result.mediaRecorder.decoded = await decodeRecorder(mrBlobs, mrInfo.mime, mrStartSec, hiddenIntervals);
     }
+    // 聞くための音（無圧縮の録音・別の録音）。この端末の中だけ。次のテストのとき、片づける
+    urlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    urlsRef.current = [];
+    const audio = {};
+    if (chunks.length) {
+      const all = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
+      let pos = 0;
+      for (const c of chunks) {
+        all.set(c, pos);
+        pos += c.length;
+      }
+      audio.pcmUrl = URL.createObjectURL(encodeWav(all, cap.sampleRate));
+      urlsRef.current.push(audio.pcmUrl);
+    }
+    if (mrBlobs.length) {
+      audio.aacUrl = URL.createObjectURL(new Blob(mrBlobs, { type: mrInfo.mime || undefined }));
+      urlsRef.current.push(audio.aacUrl);
+    }
+    result.audio = audio;
     if (save) {
       try {
         result.write = await writeTest(chunks, cap.sampleRate);
@@ -390,7 +423,7 @@ export default function RecordingDiag() {
     // 無音の再生は、ボタンを押した、その場で始める（iPhone は、操作の直後でないと、再生を許さない）
     const silent = keepAlive === "audio" || keepAlive === "both" ? startSilentAudio() : null;
     try {
-      setBg(await capture(60, { bgMode: true, silent, quietNoise: keepAlive === "noise" || keepAlive === "both" }));
+      setBg(await capture(testSec, { bgMode: true, silent, quietNoise: keepAlive === "noise" || keepAlive === "both" }));
     } catch (err) {
       setBg({ error: `${err?.name ?? ""} ${err?.message ?? err}`.trim() });
     } finally {
@@ -438,10 +471,10 @@ export default function RecordingDiag() {
     }
     const dump = (name, r) => {
       if (!r) return;
-      lines.push(`${name}：${JSON.stringify(r)}`);
+      lines.push(`${name}：${JSON.stringify(r, (k, v) => (k === "audio" ? undefined : v))}`); // 聞くための一時的な URL は、入れない
     };
     dump("マイク5秒", mic);
-    dump("画面を消す60秒", bg);
+    dump(`画面を消す${testSec}秒`, bg);
     dump("位置情報", geo);
     return lines.join("\n");
   }
@@ -561,10 +594,23 @@ export default function RecordingDiag() {
             </div>
 
             <div className={card}>
-              <div className="text-xs font-bold text-ink mb-1">④ 画面を消したときのテスト（60秒）</div>
+              <div className="text-xs font-bold text-ink mb-1">④ 画面を消したときのテスト</div>
               <p className="text-[11px] text-inkMuted leading-relaxed mb-3">
-                押したら、<b>電源ボタンで画面を消して、20秒ほど待ってから、また点けてください</b>。録音が続いていたか（音が取れていたか）と、画面を消したときの出来事を、記録します。いつでも「停止する」で、止められます。
+                押したら、<b>電源ボタンで画面を消して、しばらく待ってから、また点けてください</b>（短いテストは20秒ほど・長いテストは、数分。ホームに戻って、他のアプリを開いても、試せます）。録音が続いていたか（音が取れていたか）と、画面を消したときの出来事を、記録します。いつでも「停止する」で、止められます。
               </p>
+              <label className="mb-2 block text-[11px] text-ink">
+                <span className="font-bold">テストの長さ：</span>
+                <select
+                  value={testSec}
+                  onChange={(e) => setTestSec(Number(e.target.value))}
+                  disabled={!!busy}
+                  className="mt-1 w-full rounded-lg border-2 border-cardBorder bg-white px-2 py-1.5 text-[12px]"
+                >
+                  <option value={60}>60秒</option>
+                  <option value={300}>5分</option>
+                  <option value={600}>10分</option>
+                </select>
+              </label>
               <label className="mb-2 block text-[11px] text-ink">
                 <span className="font-bold">画面を消しても続けさせる工夫：</span>
                 <select
@@ -580,7 +626,7 @@ export default function RecordingDiag() {
                 </select>
               </label>
               <button onClick={runBg} disabled={!!busy} className={btn}>
-                {busy === "bg" ? `測定中… ${progress ?? 0}秒 / 60秒` : "60秒のテストを始める"}
+                {busy === "bg" ? `測定中… ${progress ?? 0}秒 / ${testSec}秒` : `${testSec >= 60 ? (testSec % 60 === 0 ? `${testSec / 60}分` : `${testSec}秒`) : `${testSec}秒`}のテストを始める`}
               </button>
               {busy === "bg" && <StopButton onClick={() => (stopRef.current = true)} />}
               {busy === "bg" && <EventLog lines={events} />}
@@ -616,6 +662,23 @@ export default function RecordingDiag() {
                         </>
                       ))}
                     {bg.keepAlive && <Row tone="info" label="使った工夫：" value={`無音の再生=${bg.keepAlive.silentAudio ? "あり" : "なし"}／ごく小さな音=${bg.keepAlive.quietNoise ? "あり" : "なし"}`} />}
+                    {bg.audio && (bg.audio.pcmUrl || bg.audio.aacUrl) && (
+                      <div className="mt-2 flex flex-col gap-1.5 rounded-lg bg-[#f4f2ee] p-2">
+                        <div className="text-[10px] font-bold text-inkMuted">録音した音を聞く（この端末の中だけ）</div>
+                        {bg.audio.pcmUrl && (
+                          <label className="text-[10px] text-ink">
+                            無圧縮の録音（画面が消えている間は、とぎれます）
+                            <audio controls src={bg.audio.pcmUrl} className="mt-0.5 w-full" />
+                          </label>
+                        )}
+                        {bg.audio.aacUrl && (
+                          <label className="text-[10px] text-ink">
+                            別の録音（AAC・画面を消している間も続きます）
+                            <audio controls src={bg.audio.aacUrl} className="mt-0.5 w-full" />
+                          </label>
+                        )}
+                      </div>
+                    )}
                     <EventLog lines={bg.events} title="出来事の記録" />
                     <Row tone={bg.wakeResult?.startsWith("取得できた") ? "ok" : "warn"} label="画面を点けたまま：" value={bg.wakeResult ?? "対応していない"} />
                     <Row tone="info" label="終わりの状態：" value={JSON.stringify(bg.trackStateEnd)} />
