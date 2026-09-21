@@ -14,6 +14,10 @@ import {
 } from "../lib/audioEdits";
 import { analyzeMp3Files } from "../lib/analyzerClient";
 import { runImport } from "../lib/importData";
+import { opinionRows, saveOpinions } from "../lib/modelOpinions";
+import { saveVerification } from "../lib/verifications";
+import { summarizeSpecies, findPerchOnly } from "../lib/editAnalysis";
+import EditAnalysisList from "./EditAnalysisList";
 import { refreshEditedAudio } from "../lib/offline";
 import { getRemoteAudioUrl } from "../lib/queries";
 import { forgetSpectrogram } from "../lib/spectrogram3dData";
@@ -23,6 +27,7 @@ const inputClass =
   "w-full px-3 py-2 rounded-xl border-[3px] border-cardBorder bg-white text-sm text-ink outline-none focus:border-accent";
 
 const MIN_CLIP_SEC = 1; // BirdNET が解析できる最小の長さ
+const NO_WINDOWS = []; // Perch の区間が無いとき（毎回、新しい空の配列にしない）
 
 const MIN_CONF_OPTIONS = [
   { value: "0.25", label: "0.25（BirdNET の初期値・確かなものだけ）" },
@@ -30,9 +35,33 @@ const MIN_CONF_OPTIONS = [
   { value: "0.01", label: "0.01（ほぼ全部）" },
 ];
 
+// 公開の結果の補足：確定にした鳥・Perch の意見の保存（失敗したものは、赤で）
+function PublishNotes({ result }) {
+  const c = result.confirmed;
+  const o = result.opinions;
+  return (
+    <>
+      {c && c.records > 0 && c.failed < c.records && (
+        <span className="text-[#2F8050]">
+          {" "}
+          「確定」にしました：{c.species.join("、")}（記録 {c.records - c.failed}件）。
+        </span>
+      )}
+      {c && c.failed > 0 && (
+        <span className="text-red-500">
+          {" "}
+          「確定」を保存できなかった記録が {c.failed}件あります（{c.error}）。鳥の窓の「確認する」で、確定できます。
+        </span>
+      )}
+      {o?.error && <span className="text-red-500"> Perch の意見を保存できませんでした（{o.error}）。公開は、済んでいます。</span>}
+    </>
+  );
+}
+
 // 🔥 編集した範囲の「書き出し → 解析 → 公開」（管理者だけ）。
 //    ① 保存した設定で音を加工して、MP3 にして、保管場所に保存（名前：<元の名前>_e<連番>.mp3）
-//    ② サーバー（BirdNET）で解析して、結果を見る（まだ、みんなには見えない）
+//    ② サーバー（BirdNET と Perch）で解析して、結果を見る（まだ、みんなには見えない）。両方が同じ鳥を挙げたら、強調する
+//       結果の鳥にチェック（初期は、空欄）を付けると、公開と同時に、その鳥の記録が「確定」になる
 //    ③ 「公開する」で、記録を登録する（設定は自分だけに見える）。公開したあとは、「公開を取り下げて、編集し直す」「公開をやめる」ができる（取り下げの間、記録は、みんなから見えない）
 //    sel：編集画面の範囲（保存済みで、変更が無いものだけが、書き出せる）／getFocused：加工した音（チャンネルの配列）を返す関数
 export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, sampleRate, getFocused, onPublished, onUnpublished }) {
@@ -42,7 +71,8 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
   const [exported, setExported] = useState(null); // { key, name, bytes, location }
-  const [analysis, setAnalysis] = useState(null); // { key, results, meta, warnings, elapsedSec }
+  const [analysis, setAnalysis] = useState(null); // { key, results, meta, warnings, elapsedSec, perchOn }
+  const [checked, setChecked] = useState(() => new Set()); // 「確定にする」にチェックした鳥（学名）。初期は、空欄
   const [publishResult, setPublishResult] = useState(null);
   const [confirming, setConfirming] = useState(false); // 「本当に公開しますか？」の確認を出している
   const [unpublishMode, setUnpublishMode] = useState(null); // 取り下げの確認を出している："reedit"（編集し直す）| "stop"（公開をやめる）
@@ -68,16 +98,17 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
     () => (result && !result.error ? result.rows.map((r) => ({ wav_filename: name, ...r })) : []),
     [result, name]
   );
-  const speciesList = useMemo(() => {
-    const bySpecies = new Map();
-    for (const r of records) {
-      const cur = bySpecies.get(r.scientific_name) ?? { name: r.common_name || r.scientific_name, count: 0, best: 0 };
-      cur.count += 1;
-      cur.best = Math.max(cur.best, r.confidence);
-      bySpecies.set(r.scientific_name, cur);
-    }
-    return [...bySpecies.values()].sort((a, b) => b.best - a.best);
-  }, [records]);
+  const perchWindows = analysis?.perchOn ? (result?.perch?.windows ?? NO_WINDOWS) : null; // Perch を使わなかったときは null
+  const speciesList = useMemo(() => summarizeSpecies(records, perchWindows), [records, perchWindows]); // 両方が一致した鳥を上に
+  const perchOnly = useMemo(() => findPerchOnly(perchWindows, records), [perchWindows, records]);
+  const checkedSpecies = speciesList.filter((s) => checked.has(s.sci)); // 確定にする鳥
+  const toggleChecked = (sci) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(sci)) next.delete(sci);
+      else next.add(sci);
+      return next;
+    });
   const stale = !!analysis && analysis.key !== currentKey; // 解析したあとに、設定を変えた
 
   // 公開を取り下げる（記録を消して、下書きに戻す）。mode："reedit"＝編集し直す／"stop"＝公開をやめる
@@ -96,6 +127,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
       setPublishResult(null);
       setExported(null);
       setAnalysis(null);
+      setChecked(new Set());
       onUnpublished?.(sel.id);
     } catch (err) {
       console.error(err);
@@ -113,6 +145,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
         <p className="mt-1 text-[11px] text-inkMuted leading-relaxed break-all">
           {sel.exportedName ?? name} として公開しています。
           {publishResult && `記録 ${publishResult.count}件を登録しました（合計 ${publishResult.before}件 → ${publishResult.after}件）。`}
+          {publishResult && <PublishNotes result={publishResult} />}
           範囲や下げ方の設定は、自分だけに見えます。公開したものを直したいときは、下のボタンで、公開を取り下げてください（取り下げの間、記録は、みんなから見えません）。
         </p>
 
@@ -202,8 +235,10 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
         location: useFilter ? { lat: ex.location.latitude, lon: ex.location.longitude } : null,
         useWeek: useFilter,
         stereo: "best",
+        perch: useFilter, // Perch も、合わせて解析する。場所＋時期で絞らないと、日本にいない鳥が上位に出てしまうため、絞り込みが「オン」のときだけ
       });
-      setAnalysis({ ...a, key: currentKey });
+      setAnalysis({ ...a, key: currentKey, perchOn: !!a.meta?.perch });
+      setChecked(new Set()); // チェックは、解析のたびに、空欄から
     } catch (err) {
       console.error(err);
       setError(err?.message ?? String(err));
@@ -244,7 +279,45 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
           `記録は登録されましたが、公開の印を付けられませんでした（${err?.message ?? err}）。もう一度「公開する」を押してください（同じ記録は上書きなので安全です）。`
         );
       }
-      setPublishResult({ count: records.length, before: res.before, after: res.after });
+      // 公開したあと（失敗しても、公開そのものは、有効）：①Perch の意見を保存 ②チェックした鳥を「確定」に
+      const notes = { count: records.length, before: res.before, after: res.after, opinions: null, confirmed: null };
+      if (analysis.perchOn) {
+        try {
+          notes.opinions = { saved: await saveOpinions(opinionRows(analysis.results, analysis.meta)) };
+        } catch (err) {
+          console.error(err);
+          notes.opinions = { error: err?.message ?? String(err) };
+        }
+      }
+      if (checkedSpecies.length > 0) {
+        const targets = records.filter((r) => checked.has(r.scientific_name));
+        let failed = 0;
+        let firstError = null;
+        let done = 0;
+        for (const r of targets) {
+          setProgress(`「確定」を保存しています：${done} / ${targets.length}`);
+          try {
+            await saveVerification({
+              record: {
+                wavFilename: name,
+                startSec: r.start_sec,
+                endSec: r.end_sec,
+                originalScientificName: r.scientific_name,
+                originalCommonName: r.common_name,
+              },
+              status: "confirmed",
+              method: "heard", // 編集画面で、聞きながら選んだ範囲なので、根拠は「耳」（あとで、鳥の窓の「判断を変える」で直せる）
+            });
+          } catch (err) {
+            console.error(err);
+            failed += 1;
+            firstError = firstError ?? (err?.message ?? String(err));
+          }
+          done += 1;
+        }
+        notes.confirmed = { species: checkedSpecies.map((s) => s.name), records: targets.length, failed, error: firstError };
+      }
+      setPublishResult(notes);
       // 編集し直して公開したとき、この端末（アプリ）に保存してある古い音を、新しいものに入れ替える（アプリ以外では、何もしない）
       forgetSpectrogram(name);
       refreshEditedAudio({ names: [name], getRemoteAudioUrl }).catch((err) => console.warn(err));
@@ -310,6 +383,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
               ? `場所${analysis.meta.params.use_week ? "＋時期" : ""}で絞り込み`
               : "絞り込みなし"}
             ・{analysis.meta.params.stereo === "best" ? "ステレオは左右も別々に" : "左右を混ぜた音だけ"}
+            ・{analysis.perchOn ? "Perch も解析" : "Perch は使っていません（場所と時期の絞り込みが「オン」のときだけ、合わせて解析します）"}
             ・サーバーの処理 {Math.round(analysis.elapsedSec)}秒
           </p>
 
@@ -323,15 +397,16 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
               {speciesList.length === 0 ? (
                 <p className="mt-1 text-[11px] text-inkMuted">鳥が見つかりませんでした。下限を下げると、見つかるかもしれません。</p>
               ) : (
-                <ul className="mt-1 flex flex-col gap-0.5 text-[11px] text-inkMuted">
-                  {speciesList.slice(0, 10).map((s) => (
-                    <li key={s.name}>
-                      {s.name}：{s.count}件（一番高い信頼度 {Math.round(s.best * 100)}%）
-                    </li>
-                  ))}
-                  {speciesList.length > 10 && <li>ほか {speciesList.length - 10}種</li>}
-                </ul>
+                <EditAnalysisList
+                  speciesList={speciesList}
+                  perchOn={!!analysis.perchOn}
+                  perchOnly={perchOnly}
+                  checked={checked}
+                  onToggle={toggleChecked}
+                  disabled={busy}
+                />
               )}
+              {result?.perch?.error && <p className="mt-2 text-[11px] text-red-500 break-all">Perch：{result.perch.error}</p>}
             </>
           )}
 
@@ -359,6 +434,11 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
                     </li>
                     <li>公開したあとも、「公開を取り下げて、編集し直す」ことができます（取り下げの間、記録は、みんなから見えなくなります）。元の録音は、そのまま残ります</li>
                     <li>範囲や下げ方の設定は、自分だけに見えます</li>
+                    <li>
+                      {checkedSpecies.length > 0
+                        ? `チェックした鳥（${checkedSpecies.map((s) => s.name).join("、")}）は、「確定」になります`
+                        : "チェックした鳥が無いので、「確定」にする鳥は、ありません（あとで、鳥の窓の「確認する」で、確定できます）"}
+                    </li>
                   </ul>
                   <div className="mt-3 flex gap-2">
                     <button onClick={handlePublish} className="flex-1 rounded-xl bg-red-500 text-white text-sm font-bold py-2.5">
@@ -395,6 +475,7 @@ export default function AudioPublishPanel({ sourceName, sel, normalize, dirty, s
           <div className="text-xs font-bold text-[#3F6C74]">✓ 公開しました</div>
           <p className="mt-1 text-[11px] text-inkMuted leading-relaxed break-all">
             {name}：記録 {publishResult.count}件を登録しました（合計 {publishResult.before}件 → {publishResult.after}件）。
+            <PublishNotes result={publishResult} />
           </p>
         </div>
       )}
