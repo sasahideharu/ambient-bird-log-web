@@ -21,6 +21,28 @@ function Row({ tone = "info", label, value }) {
   );
 }
 
+function StopButton({ onClick }) {
+  return (
+    <button onClick={onClick} className="mt-2 w-full rounded-xl border-2 border-red-300 bg-white text-red-500 text-sm font-bold py-2.5">
+      ■ 停止する（ここまでの結果を出す）
+    </button>
+  );
+}
+
+function EventLog({ lines, title }) {
+  if (!lines?.length) return null;
+  return (
+    <div className="mt-2 rounded-lg bg-[#f4f2ee] p-2">
+      {title && <div className="mb-1 text-[10px] font-bold text-inkMuted">{title}</div>}
+      <ul className="max-h-40 overflow-y-auto text-[10px] leading-relaxed text-ink tabular-nums">
+        {lines.map((l, i) => (
+          <li key={i}>{l}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 const yesno = (v) => (v ? "使える" : "使えない");
 const dbText = (v) => `${v.toFixed(1)} dBFS`;
 
@@ -76,8 +98,10 @@ export default function RecordingDiag() {
   const [progress, setProgress] = useState(null);
   const [level, setLevel] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [events, setEvents] = useState([]); // 出来事の記録（画面を消す・マイクが止まる、など）
   const canvasRef = useRef(null);
   const levelRef = useRef({ rms: -120, peak: -120 });
+  const stopRef = useRef(false); // 「停止する」が押された
 
   useEffect(() => {
     const nav = navigator;
@@ -96,8 +120,9 @@ export default function RecordingDiag() {
     });
   }, []);
 
-  // 録音して、様子を測る。seconds 秒間。画面を消す試験（watchVisibility）では、画面の表示・非表示も記録する
-  async function capture(seconds, { watchVisibility = false, useWakeLock = false, save = false }) {
+  // 録音して、様子を測る。seconds 秒間（「停止する」で、途中で終えられる。そのときも、ここまでの結果を出す）。
+  // bgMode：画面を消す試験。画面の表示・非表示・音の処理の状態の変化・再開の試み・時計の止まりを、すべて記録する
+  async function capture(seconds, { bgMode = false, save = false }) {
     let spec = null;
     let cap = null;
     const chunks = [];
@@ -107,25 +132,70 @@ export default function RecordingDiag() {
     let sumSq = 0;
     let count = 0;
     let peak = 0;
-    const visLog = [];
-    let startedAt = 0;
     let wake = null;
     let wakeResult = null;
+    let maxTickMs = 0;
+    const eventLog = [];
+    const t0 = Date.now();
+    stopRef.current = false;
+    setEvents([]);
 
-    const onVis = () => visLog.push({ atSec: Math.round((performance.now() - startedAt) / 100) / 10, state: document.visibilityState });
-    if (watchVisibility) document.addEventListener("visibilitychange", onVis);
-    if (useWakeLock) {
+    const log = (text) => {
+      const line = `${((Date.now() - t0) / 1000).toFixed(1)}秒 ${text}`;
+      eventLog.push(line);
+      setEvents((prev) => [...prev.slice(-39), line]);
+    };
+    // 画面を点けたままにする機能（応答が無いことがあるので、待ちすぎない）
+    const requestWake = async () => {
       try {
-        wake = await navigator.wakeLock.request("screen");
+        const lock = await Promise.race([
+          navigator.wakeLock.request("screen"),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("応答なし（3秒）")), 3000)),
+        ]);
+        wake = lock;
         wakeResult = "取得できた";
+        log("画面を点けたままにする機能：取得できた");
       } catch (err) {
-        wakeResult = `取得できなかった（${err?.name ?? err}）`;
+        wakeResult = `取得できなかった（${err?.name ?? ""} ${err?.message ?? err}）`;
+        log(`画面を点けたままにする機能：${wakeResult}`);
       }
+    };
+
+    const onVis = () => {
+      log(`画面が「${document.visibilityState === "hidden" ? "消えた" : "点いた"}」`);
+      if (document.visibilityState === "visible" && cap) {
+        cap.resume().then((st) => log(`音の処理を再開しようとした → 状態「${st}」`));
+        if (bgMode) requestWake(); // 画面が消えると、点けたままの指定は外れるので、取り直す
+      }
+    };
+    const onHide = () => log("ページが隠れた（pagehide）");
+    const onShow = () => log("ページが戻った（pageshow）");
+    const onFreeze = () => log("ページが凍結された（freeze）");
+    const onResume = () => log("ページの凍結が解けた（resume）");
+    if (bgMode) {
+      document.addEventListener("visibilitychange", onVis);
+      window.addEventListener("pagehide", onHide);
+      window.addEventListener("pageshow", onShow);
+      document.addEventListener("freeze", onFreeze);
+      document.addEventListener("resume", onResume);
     }
 
+    // 時計の止まり（画面を消して、処理が止まると、この時計が、大きく飛ぶ）
+    let lastTick = Date.now();
+    const tickId = setInterval(() => {
+      const now = Date.now();
+      const d = now - lastTick;
+      lastTick = now;
+      if (d > maxTickMs) maxTickMs = d;
+      if (d > 1500) log(`処理が止まっていた（${(d / 1000).toFixed(1)}秒間）`);
+    }, 250);
+
     let raf = 0;
+    let startedAt = 0;
     try {
+      if (bgMode) await requestWake();
       cap = await startPcmCapture({
+        onEvent: log,
         onChunk: (chunk, info) => {
           chunks.push(chunk);
           const gap = info.wallMs - lastWall;
@@ -144,27 +214,46 @@ export default function RecordingDiag() {
           levelRef.current = { rms: 20 * Math.log10(Math.sqrt(sumSq / count) + 1e-9), peak: 20 * Math.log10(peak + 1e-9) };
         },
       });
-      startedAt = performance.now();
+      startedAt = Date.now();
+      log(`録音を始めた（${cap.mode}・${cap.sampleRate}Hz）`);
       const loop = () => {
         if (spec && canvasRef.current) spec.draw(canvasRef.current);
-        setProgress(Math.min(seconds, Math.round((performance.now() - startedAt) / 100) / 10));
+        setProgress(Math.min(seconds, Math.round((Date.now() - startedAt) / 100) / 10));
         setLevel({ ...levelRef.current });
         raf = requestAnimationFrame(loop);
       };
       raf = requestAnimationFrame(loop);
-      await new Promise((r) => setTimeout(r, seconds * 1000));
+      // 時間が来るか、「停止する」が押されるまで待つ（実際の時計で数える）
+      await new Promise((resolve) => {
+        const id = setInterval(() => {
+          if (stopRef.current || Date.now() - startedAt >= seconds * 1000) {
+            clearInterval(id);
+            resolve();
+          }
+        }, 100);
+      });
+      log(stopRef.current ? "「停止する」が押された" : "時間が来た");
     } finally {
       cancelAnimationFrame(raf);
-      if (watchVisibility) document.removeEventListener("visibilitychange", onVis);
+      clearInterval(tickId);
+      if (bgMode) {
+        document.removeEventListener("visibilitychange", onVis);
+        window.removeEventListener("pagehide", onHide);
+        window.removeEventListener("pageshow", onShow);
+        document.removeEventListener("freeze", onFreeze);
+        document.removeEventListener("resume", onResume);
+      }
       if (wake) wake.release().catch(() => {});
     }
     const trackStateEnd = cap?.trackState?.();
     await cap?.stop();
+    log("録音を止めた");
 
     const wallSec = lastWall / 1000;
     const expected = wallSec * cap.sampleRate;
     const result = {
       seconds,
+      stoppedEarly: stopRef.current,
       mode: cap.mode,
       sampleRate: cap.sampleRate,
       settings: cap.settings,
@@ -174,9 +263,10 @@ export default function RecordingDiag() {
       ratio: expected > 0 ? count / expected : 0,
       maxGapMs,
       gaps,
+      maxTickMs,
       rmsDb: 20 * Math.log10(Math.sqrt(sumSq / (count || 1)) + 1e-9),
       peakDb: 20 * Math.log10(peak + 1e-9),
-      visLog,
+      events: eventLog,
       wakeResult,
       trackStateEnd,
     };
@@ -207,7 +297,7 @@ export default function RecordingDiag() {
     setBusy("bg");
     setBg(null);
     try {
-      setBg(await capture(60, { watchVisibility: true, useWakeLock: true }));
+      setBg(await capture(60, { bgMode: true }));
     } catch (err) {
       setBg({ error: `${err?.name ?? ""} ${err?.message ?? err}`.trim() });
     } finally {
@@ -342,6 +432,7 @@ export default function RecordingDiag() {
               <button onClick={runMic} disabled={!!busy} className={btn}>
                 {busy === "mic" ? `録音中… ${progress ?? 0}秒` : "マイクをテストする"}
               </button>
+              {busy === "mic" && <StopButton onClick={() => (stopRef.current = true)} />}
               {(busy === "mic" || busy === "bg") && (
                 <div className="mt-3">
                   <canvas ref={canvasRef} width={640} height={280} className="w-full rounded-lg bg-black" />
@@ -379,11 +470,13 @@ export default function RecordingDiag() {
             <div className={card}>
               <div className="text-xs font-bold text-ink mb-1">④ 画面を消したときのテスト（60秒）</div>
               <p className="text-[11px] text-inkMuted leading-relaxed mb-3">
-                押したら、<b>電源ボタンで画面を消して、20秒ほど待ってから、また点けてください</b>。録音が続いていたか（音が取れていたか）を調べます。
+                押したら、<b>電源ボタンで画面を消して、20秒ほど待ってから、また点けてください</b>。録音が続いていたか（音が取れていたか）と、画面を消したときの出来事を、記録します。いつでも「停止する」で、止められます。
               </p>
               <button onClick={runBg} disabled={!!busy} className={btn}>
                 {busy === "bg" ? `測定中… ${progress ?? 0}秒 / 60秒` : "60秒のテストを始める"}
               </button>
+              {busy === "bg" && <StopButton onClick={() => (stopRef.current = true)} />}
+              {busy === "bg" && <EventLog lines={events} />}
               {bg &&
                 (bg.error ? (
                   <Row tone="ng" label="失敗：" value={bg.error} />
@@ -392,7 +485,9 @@ export default function RecordingDiag() {
                     <Row tone={bg.ratio >= 0.97 ? "ok" : "ng"} label="音が取れた割合：" value={`${(bg.ratio * 100).toFixed(1)}%（100%に近いほど、途切れなし）`} />
                     <Row tone={bg.maxGapMs <= 250 ? "ok" : "ng"} label="最大の途切れ：" value={`${(bg.maxGapMs / 1000).toFixed(1)}秒`} />
                     <Row tone="info" label="途切れた場所：" value={bg.gaps.length ? bg.gaps.map((g) => `${g.atSec}秒に${g.gapSec}秒`).join("、") : "なし"} />
-                    <Row tone="info" label="画面の切り替わり：" value={bg.visLog.length ? bg.visLog.map((v) => `${v.atSec}秒:${v.state === "hidden" ? "消えた" : "点いた"}`).join("、") : "記録なし（画面を消さなかった？）"} />
+                    {bg.stoppedEarly && <Row tone="info" label="止め方：" value="「停止する」で、途中で止めた" />}
+                    <Row tone={bg.maxTickMs <= 1500 ? "ok" : "warn"} label="処理の止まり：" value={bg.maxTickMs > 1500 ? `画面を消している間、処理が最大 ${(bg.maxTickMs / 1000).toFixed(1)}秒 止まった` : "止まらなかった"} />
+                    <EventLog lines={bg.events} title="出来事の記録" />
                     <Row tone={bg.wakeResult?.startsWith("取得できた") ? "ok" : "warn"} label="画面を点けたまま：" value={bg.wakeResult ?? "対応していない"} />
                     <Row tone="info" label="終わりの状態：" value={JSON.stringify(bg.trackStateEnd)} />
                   </div>
