@@ -64,6 +64,38 @@ function toInt16(chunks) {
   return out;
 }
 
+// 別の録音（MediaRecorder）を解読して、1秒ごとの音の大きさ（dBFS）を測る。画面が消えていた間と、点いていた間の、平均も出す。
+// 画面を消している間、届いたデータが「本当にマイクの音」か（無音ではないか）を、確かめるため
+async function decodeRecorder(blobs, mime, startSec, hiddenIntervals) {
+  try {
+    const bytes = await new Blob(blobs, { type: mime || undefined }).arrayBuffer();
+    const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const buf = await new Promise((resolve, reject) => new Offline(1, 1, 48000).decodeAudioData(bytes, resolve, reject));
+    const ch = buf.getChannelData(0);
+    const sr = buf.sampleRate;
+    const perSec = [];
+    for (let i = 0; i + sr <= ch.length; i += sr) {
+      let sum = 0;
+      for (let j = i; j < i + sr; j++) sum += ch[j] * ch[j];
+      perSec.push(Math.round(10 * (10 * Math.log10(sum / sr + 1e-12))) / 10);
+    }
+    // 画面が消えていた秒（前後1秒は、境目なので、除く）／点いていた秒
+    const inHidden = (t) => hiddenIntervals.some(([a, b]) => t >= a + 1 && t + 1 <= b - 1);
+    const inVisible = (t) => t >= 1 && !hiddenIntervals.some(([a, b]) => t + 1 > a - 1 && t < b + 1);
+    const mean = (arr) => (arr.length ? Math.round(10 * (10 * Math.log10(arr.reduce((s, db) => s + 10 ** (db / 10), 0) / arr.length + 1e-12))) / 10 : null);
+    const hidden = [];
+    const visible = [];
+    perSec.forEach((db, i) => {
+      const t = startSec + i; // 開始からの秒
+      if (inHidden(t)) hidden.push(db);
+      else if (inVisible(t)) visible.push(db);
+    });
+    return { durationSec: Math.round(buf.duration * 10) / 10, sampleRate: sr, hiddenAvgDb: mean(hidden), hiddenSeconds: hidden.length, visibleAvgDb: mean(visible), visibleSeconds: visible.length, perSecondDb: perSec };
+  } catch (err) {
+    return { error: `解読できませんでした（${err?.message ?? err}）` };
+  }
+}
+
 // 端末への書き込みの試験（アプリだけ）。1秒分ずつ、書き足していく（本番の録音と同じやり方）
 async function writeTest(chunks, sampleRate) {
   if (!Capacitor.isNativePlatform()) return { skipped: "アプリではないので、試験しません" };
@@ -100,7 +132,7 @@ export default function RecordingDiag() {
   const [level, setLevel] = useState(null);
   const [copied, setCopied] = useState(false);
   const [events, setEvents] = useState([]); // 出来事の記録（画面を消す・マイクが止まる、など）
-  const [keepAlive, setKeepAlive] = useState("both"); // 画面を消しても、音の処理を続けさせる工夫：none | audio | noise | both
+  const [keepAlive, setKeepAlive] = useState("none"); // 画面を消しても、音の処理を続けさせる工夫：none | audio | noise | both
   const canvasRef = useRef(null);
   const levelRef = useRef({ rms: -120, peak: -120 });
   const stopRef = useRef(false); // 「停止する」が押された
@@ -165,6 +197,12 @@ export default function RecordingDiag() {
 
     const onVis = () => {
       log(`画面が「${document.visibilityState === "hidden" ? "消えた" : "点いた"}」`);
+      const nowSec = (Date.now() - t0) / 1000;
+      if (document.visibilityState === "hidden") hiddenFrom = nowSec;
+      else if (hiddenFrom !== null) {
+        hiddenIntervals.push([hiddenFrom, nowSec]);
+        hiddenFrom = null;
+      }
       if (document.visibilityState === "visible" && cap) {
         cap.resume().then((st) => log(`音の処理を再開しようとした → 状態「${st}」`));
         if (bgMode) requestWake(); // 画面が消えると、点けたままの指定は外れるので、取り直す
@@ -195,6 +233,10 @@ export default function RecordingDiag() {
     let raf = 0;
     let startedAt = 0;
     let mr = null;
+    const mrBlobs = [];
+    let mrStartSec = 0;
+    const hiddenIntervals = []; // 画面が消えていた時間（開始からの秒）
+    let hiddenFrom = null;
     const mrInfo = { mime: null, chunks: 0, bytes: 0, lastT: null, maxGapSec: 0, error: null };
     try {
       if (bgMode) await requestWake();
@@ -225,9 +267,12 @@ export default function RecordingDiag() {
       // 観察：音の処理が中断されている間も、マイクの流れ（MediaRecorder）は、届き続けるか
       if (bgMode && typeof MediaRecorder !== "undefined" && cap.stream) {
         try {
-          mr = new MediaRecorder(cap.stream);
-          mrInfo.mime = mr.mimeType;
+          // 形式：iPhone は AAC（audio/mp4）。ビットレートは高め（256kbps）
+          const mimeType = ["audio/mp4;codecs=mp4a.40.2", "audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find((t) => MediaRecorder.isTypeSupported?.(t));
+          mr = new MediaRecorder(cap.stream, mimeType ? { mimeType, audioBitsPerSecond: 256000 } : undefined);
+          mrStartSec = (Date.now() - t0) / 1000;
           mr.ondataavailable = (e) => {
+            mrBlobs.push(e.data);
             mrInfo.chunks += 1;
             mrInfo.bytes += e.data.size;
             const t = (Date.now() - t0) / 1000;
@@ -235,6 +280,7 @@ export default function RecordingDiag() {
             mrInfo.lastT = t;
           };
           mr.start(1000);
+          mrInfo.mime = mr.mimeType || mimeType || "";
         } catch (err) {
           mrInfo.error = err?.message ?? String(err);
         }
@@ -269,10 +315,21 @@ export default function RecordingDiag() {
       if (wake) wake.release().catch(() => {});
     }
     const trackStateEnd = cap?.trackState?.();
-    try {
-      if (mr && mr.state !== "inactive") mr.stop();
-    } catch {
-      // すでに止まっている
+    if (hiddenFrom !== null) hiddenIntervals.push([hiddenFrom, (Date.now() - t0) / 1000]); // 画面が消えたまま終わった
+    if (mr && mr.state !== "inactive") {
+      await new Promise((resolve) => {
+        const done = setTimeout(resolve, 2000);
+        mr.onstop = () => {
+          clearTimeout(done);
+          resolve();
+        };
+        try {
+          mr.stop();
+        } catch {
+          clearTimeout(done);
+          resolve();
+        }
+      });
     }
     silent?.stop();
     await cap?.stop();
@@ -301,6 +358,9 @@ export default function RecordingDiag() {
       wakeResult,
       trackStateEnd,
     };
+    if (bgMode && mrBlobs.length) {
+      result.mediaRecorder.decoded = await decodeRecorder(mrBlobs, mrInfo.mime, mrStartSec, hiddenIntervals);
+    }
     if (save) {
       try {
         result.write = await writeTest(chunks, cap.sampleRate);
@@ -513,10 +573,10 @@ export default function RecordingDiag() {
                   disabled={!!busy}
                   className="mt-1 w-full rounded-lg border-2 border-cardBorder bg-white px-2 py-1.5 text-[12px]"
                 >
+                  <option value="none">なし（まず、これで試してください）</option>
                   <option value="both">無音の再生 ＋ ごく小さな音（両方）</option>
                   <option value="audio">無音の再生だけ</option>
                   <option value="noise">ごく小さな音だけ</option>
-                  <option value="none">なし（前回と同じ）</option>
                 </select>
               </label>
               <button onClick={runBg} disabled={!!busy} className={btn}>
@@ -541,6 +601,20 @@ export default function RecordingDiag() {
                         value={bg.mediaRecorder.error ? bg.mediaRecorder.error : `${bg.mediaRecorder.chunks}個・${Math.round(bg.mediaRecorder.bytes / 1024)}KB（${bg.mediaRecorder.mime}）／最大の届かない時間 ${bg.mediaRecorder.maxGapSec}秒`}
                       />
                     )}
+                    {bg.mediaRecorder?.decoded &&
+                      (bg.mediaRecorder.decoded.error ? (
+                        <Row tone="warn" label="別の録音の中身：" value={bg.mediaRecorder.decoded.error} />
+                      ) : (
+                        <>
+                          <Row tone="info" label="別の録音の長さ：" value={`${bg.mediaRecorder.decoded.durationSec}秒（${bg.mediaRecorder.decoded.sampleRate}Hz）`} />
+                          <Row
+                            tone={bg.mediaRecorder.decoded.hiddenSeconds === 0 ? "info" : bg.mediaRecorder.decoded.hiddenAvgDb > -85 ? "ok" : "ng"}
+                            label="画面を消していた間の音の大きさ："
+                            value={bg.mediaRecorder.decoded.hiddenSeconds === 0 ? "測れなかった（画面を消さなかった？）" : `${bg.mediaRecorder.decoded.hiddenAvgDb} dBFS（${bg.mediaRecorder.decoded.hiddenSeconds}秒分）`}
+                          />
+                          <Row tone="info" label="画面が点いていた間の音の大きさ：" value={`${bg.mediaRecorder.decoded.visibleAvgDb} dBFS（${bg.mediaRecorder.decoded.visibleSeconds}秒分）`} />
+                        </>
+                      ))}
                     {bg.keepAlive && <Row tone="info" label="使った工夫：" value={`無音の再生=${bg.keepAlive.silentAudio ? "あり" : "なし"}／ごく小さな音=${bg.keepAlive.quietNoise ? "あり" : "なし"}`} />}
                     <EventLog lines={bg.events} title="出来事の記録" />
                     <Row tone={bg.wakeResult?.startsWith("取得できた") ? "ok" : "warn"} label="画面を点けたまま：" value={bg.wakeResult ?? "対応していない"} />
