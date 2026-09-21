@@ -481,12 +481,29 @@ class LiveAnalyzer:
         return self.species_cache[key]
 
     @modal.method()
-    def warm(self) -> dict:
-        """モデルを読み込んで待機させる（録音の画面を開いたときに、先に起こしておく）"""
-        return {"ready": True}
+    def warm(self, location=None, week=None) -> dict:
+        """録音の画面を開いたときに、先に起こしておく：モデルを読み込み（setup）、この場所・この週の種の一覧を作り、
+        ダミーの音（5秒）を、本番と同じ道順で1回解析して、初回の遅さを済ませる"""
+        import subprocess
+        import time
+
+        t = time.time()
+        if not getattr(self, "_synthetic_done", False):
+            mp3 = subprocess.run(
+                ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anoisesrc=d=5:c=pink:a=0.05:r=48000", "-ac", "1", "-b:a", "192k", "-f", "mp3", "-"],
+                capture_output=True,
+            ).stdout
+            self._analyze({"audio": mp3, "location": location, "week": week, "samples": 240000})
+            self._synthetic_done = True
+        elif location:
+            self._allowed(location, week or -1, 0.03)  # 場所が変わったときは、その種の一覧だけ作る
+        return {"ready": True, "warm_sec": round(time.time() - t, 2)}
 
     @modal.method()
     def analyze(self, req: dict) -> dict:
+        return self._analyze(req)
+
+    def _analyze(self, req: dict) -> dict:
         """短い音（MP3・約5秒）を解析して、BirdNET（最後の3秒）と Perch（最後の5秒）の結果を返す。
         アプリは、録音の3秒ごとに、その時点までの最後の5秒を送る（3秒の区間の位置は、録音の始めから 3 秒の倍数にそろう）。
         req: audio（MP3 のバイト列）／codec_rate（MP3 の符号化のサンプルレート・標準 48000。遅れの補正に使う）／
@@ -525,7 +542,9 @@ class LiveAnalyzer:
         timings["decode"] = round(time.time() - t, 3)
         if len(a48) < 48000:  # 1秒未満は、解析できない
             return {"ok": False, "error": "音が短すぎます", "timings": timings}
+        t = time.time()
         allowed = self._allowed(location, week, sf_thresh)
+        timings["allowed"] = round(time.time() - t, 3)  # 場所・週が初めてのときだけ、時間がかかる（種の一覧を作る）
         allowed_sci = allowed[0] if allowed else None
         total_sec = len(a48) / 48000
 
@@ -644,7 +663,7 @@ def web():
         if admins.status_code != 200 or not admins.json():
             raise HTTPException(status_code=403, detail="管理者だけが使えます")
 
-    # ログインの確認は、Supabase に2回問い合わせる（約0.3秒）。リアルタイムは3秒おきに呼ぶので、確認済みのトークンは60秒、覚えておく
+    # ログインの確認は、Supabase に2回問い合わせる（約0.3秒）。リアルタイムは3秒おきに呼ぶので、確認済みのトークンは5分、覚えておく（録音の画面を開いてから録音を始めるまでの間に、切れないように）
     verified = {}  # トークン → 有効な時刻（秒）
 
     def require_admin_cached(authorization: str | None, apikey: str | None):
@@ -652,7 +671,7 @@ def web():
         if authorization and verified.get(authorization, 0) > now:
             return
         require_admin(authorization, apikey)
-        verified[authorization] = now + 60
+        verified[authorization] = now + 300
         if len(verified) > 200:  # 溜まりすぎないように、古いものを捨てる
             for k in [k for k, v in verified.items() if v <= now]:
                 verified.pop(k, None)
@@ -670,11 +689,22 @@ def web():
         return analyze_batch.remote(req.model_dump())
 
     @api.post("/live/warm")
-    async def live_warm(authorization: str | None = Header(default=None), apikey: str | None = Header(default=None)):
-        """録音の画面を開いたときに呼ぶ。モデルを読み込んだ待機の入れ物を、先に起こしておく（起きるまで待って返す＝返ったら、すぐ解析できる。約20秒）"""
+    async def live_warm(
+        lat: float | None = None,
+        lon: float | None = None,
+        week: int | None = None,
+        authorization: str | None = Header(default=None),
+        apikey: str | None = Header(default=None),
+    ):
+        """録音の画面を開いたときに呼ぶ。モデルを読み込んだ待機の入れ物を、先に起こして、この場所・週の準備と、ダミーの解析まで済ませる
+        （終わるまで待って返す＝返ったら、最初の解析から速い。起こすところからだと、約25秒）"""
         await run_in_threadpool(require_admin_cached, authorization, apikey)
-        await LiveAnalyzer().warm.remote.aio()
-        return {"ok": True}
+        if (lat is None) != (lon is None) or (lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180)):
+            raise HTTPException(status_code=400, detail="場所が正しくありません")
+        if week is not None and not (1 <= week <= 48):
+            raise HTTPException(status_code=400, detail="週が正しくありません")
+        res = await LiveAnalyzer().warm.remote.aio({"lat": lat, "lon": lon} if lat is not None else None, week)
+        return {"ok": True, **res}
 
     @api.post("/live")
     async def live(
@@ -690,8 +720,11 @@ def web():
         apikey: str | None = Header(default=None),
     ):
         """録音しながらの解析。本文＝MP3（最後の約5秒）。返すのは、BirdNET（最後の3秒）と Perch（最後の5秒）の結果。何も保存しない"""
+        t0 = time.time()
         await run_in_threadpool(require_admin_cached, authorization, apikey)
+        t_auth = time.time() - t0
         data = await request.body()
+        t_body = time.time() - t0 - t_auth
         if not data or len(data) > LIVE_MAX_BYTES:
             raise HTTPException(status_code=400, detail="音の大きさが正しくありません")
         if (lat is None) != (lon is None) or (lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180)):
@@ -709,7 +742,12 @@ def web():
             "codec_rate": codec_rate,
             "samples": samples,
         }
-        return await LiveAnalyzer().analyze.remote.aio(req)
+        t1 = time.time()
+        res = await LiveAnalyzer().analyze.remote.aio(req)
+        # 内訳（遅いときの原因さがし用）：ログインの確認・音を受け取る時間・サーバーの呼び出し（計算を含む）
+        res["gateway"] = {"auth": round(t_auth, 3), "body": round(t_body, 3), "remote": round(time.time() - t1, 3), "bytes": len(data)}
+        print(f"[live] {res['gateway']} server={res.get('elapsed_sec')} timings={res.get('timings')}")
+        return res
 
     return api
 

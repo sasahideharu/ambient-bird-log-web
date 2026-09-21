@@ -9,7 +9,7 @@ const mmss = (sec) => {
 
 const STATUS_TEXT = {
   idle: "解析の準備中…",
-  working: "解析中…（サーバーを起こしています）",
+  working: "解析中…（最初の結果を待っています）",
   ok: "解析中",
   slow: "解析中（返事が遅めです）",
   offline: "電波なし：録音だけ（あとで解析）",
@@ -61,7 +61,11 @@ export default function LiveBirds({ list, state, enabled, finished = false }) {
     <div className="mt-3">
       <div className={`mb-1.5 flex items-center justify-between text-[10px] ${warn ? "text-[#C2860A]" : "text-inkMuted"}`}>
         <span className="font-bold">{STATUS_TEXT[status] ?? ""}</span>
-        {state?.latencySec != null && status !== "off" && !finished && <span className="tabular-nums">{state.latencySec}秒</span>}
+        {state?.latencySec != null && status !== "off" && !finished && (
+          <span className="tabular-nums">
+            {state.latencySec}秒<span className="text-[9px]">（変換{state.encodeSec}＋往復{state.fetchSec}／計算{state.serverSec ?? "-"}）</span>
+          </span>
+        )}
       </div>
       {state?.message && enabled && !finished && <p className="mb-1.5 text-[10px] leading-relaxed text-[#C2860A]">{state.message}</p>}
       {list.agreed.length > 0 && (

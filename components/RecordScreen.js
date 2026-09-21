@@ -59,7 +59,7 @@ export default function RecordScreen() {
   const engineRef = useRef(null);
   const liveOnRef = useRef(true);
   liveOnRef.current = liveOn;
-  const warmedAtRef = useRef(0);
+  const warmedRef = useRef({ key: "", at: 0 }); // 最後に起こした場所と時刻
   const locRef = useRef(loc);
   locRef.current = loc;
   const settingsRef = useRef(settings);
@@ -94,18 +94,24 @@ export default function RecordScreen() {
   }
 
   // 解析サーバーを、先に起こしておく（録音の画面を開いたとき・電波が戻ったとき）。起きるまで、約20秒かかる
-  const wakeServer = useCallback(async () => {
-    if (Date.now() - warmedAtRef.current < WARM_VALID_MS) return;
-    warmedAtRef.current = Date.now();
+  //   場所が分かってから呼ぶ（その場所の種の一覧も、先に作っておく＝録音を始めてすぐ、速く返る）。場所が変わったら、もう一度
+  const wakeServer = useCallback(async (place) => {
+    const key = place ? `${place.latitude.toFixed(3)},${place.longitude.toFixed(3)}` : "none";
+    const last = warmedRef.current;
+    if (last.key === key && Date.now() - last.at < WARM_VALID_MS) return;
+    warmedRef.current = { key, at: Date.now() };
     setWarm("warming");
-    const ok = await warmLiveServer();
-    if (!ok) warmedAtRef.current = 0; // 失敗したときは、次の機会に、やり直す
+    const ok = await warmLiveServer(place);
+    if (!ok) warmedRef.current = { key: "", at: 0 }; // 失敗したときは、次の機会に、やり直す
     setWarm(ok ? "ready" : "failed");
   }, []);
 
+  const placeLat = loc.latitude ?? null;
+  const placeLon = loc.longitude ?? null;
   useEffect(() => {
-    if (login.loggedIn && liveOn && online) wakeServer();
-  }, [login.loggedIn, liveOn, online, wakeServer]);
+    if (!login.loggedIn || !liveOn || !online || loc.status === "checking") return;
+    wakeServer(placeLat != null && placeLon != null ? { latitude: placeLat, longitude: placeLon } : null);
+  }, [login.loggedIn, liveOn, online, loc.status, placeLat, placeLon, wakeServer]);
 
   // 場所：位置情報（GPS）を取る。取れなければ、デフォルトの場所。近くに、これまでの場所があれば、その名前を提案する
   const refreshLocation = useCallback(async () => {
