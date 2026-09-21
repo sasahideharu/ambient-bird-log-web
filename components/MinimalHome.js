@@ -295,6 +295,22 @@ function MinimalHomeInner({ promptLogin = false }) {
                     </button>
                   )}
                   {isApp && (
+                    <Link
+                      href="/record"
+                      className="whitespace-nowrap hover:text-[#555] underline underline-offset-2 transition-colors"
+                    >
+                      録音
+                    </Link>
+                  )}
+                  {isApp && (
+                    <Link
+                      href="/recordings"
+                      className="whitespace-nowrap hover:text-[#555] underline underline-offset-2 transition-colors"
+                    >
+                      録音の一覧
+                    </Link>
+                  )}
+                  {isApp && (
                     // 開発中：録音の下見（診断）。録音機能ができたら、録音の入口に置き換える
                     <Link
                       href="/diag"
