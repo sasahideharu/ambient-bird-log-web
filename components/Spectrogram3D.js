@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createViewer } from "../lib/spectrogram3d";
-import { loadSpectrogram } from "../lib/spectrogram3dData"; // 録音を読み込んで、左右のスペクトログラムにする（「大きく見る」の元の画面と共通）
+import { loadSpectrogram, loadPcm } from "../lib/spectrogram3dData"; // 録音を読み込んで、左右のスペクトログラムにする（「大きく見る」の元の画面と共通）
+import { createScrubPlayer, scrubSupported } from "../lib/scrubPlayer"; // 再生位置のスライダーを手でずらしたとき、レコードのように鳴らす
 
 const VIEW_BUTTONS = [
   { id: "iso", label: "ななめ" },
@@ -10,6 +11,8 @@ const VIEW_BUTTONS = [
   { id: "side", label: "横（時間×周波数）" },
   { id: "top", label: "上（左右×時間）" },
 ];
+
+const RATES = [0.25, 0.5, 0.75, 1]; // 再生の速さ（1＝ふつう。小さいほど、スロー）
 
 const btn = "rounded-lg border border-[#2a313b] bg-[#1f252d] px-3 py-1.5 text-[12px] text-[#e8edf3] hover:border-[#4aa3ff] disabled:opacity-40";
 const btnOn = "!border-[#4aa3ff] !bg-[#173049]";
@@ -19,6 +22,9 @@ const valCls = "text-[#4aa3ff] tabular-nums";
 // 🔥 3D スペクトログラム：縦＝周波数、横＝左右（音が大きいほど幅広く）、奥＝時間。再生ボタン・再生位置の線つき。
 //    はじめは3D（ななめ）。「2Dで見る」ボタンで、横（時間×周波数）の2D表示になる。2D表示で再生すると、視点が「横」から「ななめ」へ、ゆっくり変わる（聞き終わりは「ななめ」）。手で回すと止まる。
 //    描き方は、線（初期）／面／面＋線。
+//    再生の速さ：スロー（×0.25・×0.5・×0.75）で、再生できる。音の高さは、保つ（設定で、下げることもできる）。
+//    再生位置のスライダーを、指でずらすと、レコードのように、ずらす速さ・向きで、音が鳴る（戻すと、逆再生。止めると、無音）。
+//      ずらし終わったとき、ずらす前に再生中だったなら、そこから再生を続ける。
 //    src：録音の URL／startSec・endSec：見る範囲（秒。無ければ全体）／title：上に出す名前／onClose：閉じる
 export default function Spectrogram3D({ src, startSec = null, endSec = null, title = "", onClose }) {
   const stageRef = useRef(null);
@@ -34,6 +40,9 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
   const rangeStartRef = useRef(0);
   const loopRef = useRef(false);
   const headShownRef = useRef(false); // 再生位置の線を、いま出しているか
+  const scrubRef = useRef(null); // ずらして聞くためのプレーヤー
+  const scrubbingRef = useRef(false); // いま、スライダーを手でずらしているか
+  const resumeAfterScrubRef = useRef(false); // ずらす前に、再生中だったか（ずらし終わったら、続ける）
 
   const [status, setStatus] = useState("loading"); // loading | ready | error
   const [errorMsg, setErrorMsg] = useState(null);
@@ -54,6 +63,8 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
   const [lineCount, setLineCount] = useState(80);
   const [thick, setThick] = useState(2); // 線の太さ 1〜4（初期：ふつう）
   const [loop, setLoop] = useState(false);
+  const [rate, setRate] = useState(1); // 再生の速さ
+  const [pitchKeep, setPitchKeep] = useState(true); // 遅くしても、音の高さを保つか
   const [maxHz, setMaxHz] = useState(10000);
   const [autoHz, setAutoHz] = useState(10000);
   const [hzIsAuto, setHzIsAuto] = useState(true);
@@ -81,12 +92,13 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
           if (!audio || !d || !v) return;
           const start = rangeStartRef.current;
           // 再生位置の線は、再生中だけ出す（止まっているときは、出さない）
-          const playingNow = !audio.paused && !audio.ended;
+          const scrubbing = scrubbingRef.current; // 手でずらしている間は、スライダーの位置が、再生位置（audio は止めてある）
+          const playingNow = scrubbing || (!audio.paused && !audio.ended);
           if (playingNow !== headShownRef.current) {
             headShownRef.current = playingNow;
             v.setPlayheadVisible(playingNow);
           }
-          if (playingNow) {
+          if (playingNow && !scrubbing) {
             // 指定した範囲の終わりまで来たら、止める（くり返しがオンなら、最初へ）
             if (audio.currentTime >= start + d.duration - 0.02) {
               if (loopRef.current) {
@@ -136,6 +148,18 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
     };
   }, []);
 
+  // ずらして聞くためのプレーヤー（AudioWorklet が使えない環境では、作らない）。閉じるときに、片づける
+  useEffect(() => {
+    if (!scrubSupported()) return;
+    const player = createScrubPlayer();
+    scrubRef.current = player;
+    return () => {
+      scrubbingRef.current = false;
+      player.dispose();
+      scrubRef.current = null;
+    };
+  }, []);
+
   // 再生位置の数字とスライダー（毎フレーム、画面全体を描き直さないよう、直接書き換える）
   function showTime(t, duration) {
     const now = performance.now();
@@ -172,6 +196,12 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
         setStatus("ready");
         showTime(0, data.duration);
         if (audioRef.current) audioRef.current.currentTime = rangeStartRef.current;
+        // ずらして聞くための音（左右のサンプル）。読み込めなくても、ほかの機能は、そのまま使える
+        loadPcm(src, startSec, endSec)
+          .then(({ channels, sampleRate }) => {
+            if (!cancelled) scrubRef.current?.load(channels, sampleRate);
+          })
+          .catch((err) => console.warn("ずらして聞くための音を、読み込めませんでした", err));
       })
       .catch((err) => {
         console.error(err);
@@ -189,6 +219,16 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
   useEffect(() => {
     viewerRef.current?.set({ widthScale, floor, smooth, colorMode, midDark, grid, auto: autoRotate, maxHz, drawMode, lineCount, thick });
   }, [widthScale, floor, smooth, colorMode, midDark, grid, autoRotate, maxHz, drawMode, lineCount, thick]);
+
+  // 再生の速さ（スロー）と、音の高さを保つか
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.playbackRate = rate;
+    a.preservesPitch = pitchKeep; // ブラウザによって、名前が違う
+    a.webkitPreservesPitch = pitchKeep;
+    a.mozPreservesPitch = pitchKeep;
+  }, [rate, pitchKeep, status]);
 
   // ---------- 再生 ----------
   const togglePlay = useCallback(async () => {
@@ -239,10 +279,55 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
     const d = dataRef.current;
     if (!d) return;
     const t = Number(e.target.value);
-    if (audioRef.current) audioRef.current.currentTime = rangeStartRef.current + t;
+    if (scrubbingRef.current) {
+      scrubRef.current?.move(t); // ずらしている間は、音の位置が、この位置を追いかける（audio の位置は、ずらし終わったときに合わせる）
+    } else if (audioRef.current) {
+      audioRef.current.currentTime = rangeStartRef.current + t;
+    }
     endedRef.current = t >= d.duration - 0.02;
     viewerRef.current?.setPlayhead(t);
     if (clockRef.current) clockRef.current.textContent = `${t.toFixed(1)} / ${d.duration.toFixed(1)}秒`;
+  }
+
+  // スライダーに触れた：再生中なら止めて、ずらして聞くモードに入る（指を離したら、終わる）
+  function scrubStart() {
+    const audio = audioRef.current;
+    const d = dataRef.current;
+    const v = viewerRef.current;
+    if (!audio || !d || !v || scrubbingRef.current) return;
+    scrubbingRef.current = true;
+    resumeAfterScrubRef.current = !audio.paused && !audio.ended;
+    audio.pause();
+    setPlaying(false);
+    v.setPlayheadVisible(true);
+    headShownRef.current = true;
+    scrubRef.current?.start(Number(seekRef.current?.value ?? 0)).catch((err) => console.warn("ずらして聞く音を、始められませんでした", err));
+    const end = () => {
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      scrubEnd();
+    };
+    window.addEventListener("pointerup", end); // 指がスライダーの外で離れても、終わるように
+    window.addEventListener("pointercancel", end);
+  }
+
+  function scrubEnd() {
+    if (!scrubbingRef.current) return;
+    scrubbingRef.current = false;
+    scrubRef.current?.stop();
+    const audio = audioRef.current;
+    const d = dataRef.current;
+    if (!audio || !d) return;
+    const t = Number(seekRef.current?.value ?? 0);
+    audio.currentTime = rangeStartRef.current + t;
+    endedRef.current = t >= d.duration - 0.02;
+    if (resumeAfterScrubRef.current && !endedRef.current) {
+      audio
+        .play()
+        .then(() => setPlaying(true))
+        .catch((err) => console.error(err));
+    }
+    resumeAfterScrubRef.current = false;
   }
 
   function pickView(id) {
@@ -307,29 +392,44 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
         )}
       </div>
 
-      {/* 再生バー */}
-      <div className="flex items-center gap-2 border-t border-[#2a313b] bg-[#161a20] px-2.5 py-2">
-        <button onClick={togglePlay} disabled={!ready} className={`${btn} min-w-[78px] !py-2 font-semibold ${playing ? btnOn : ""}`}>
-          {playing ? "■ 停止" : "▶ 再生"}
-        </button>
-        <input
-          ref={seekRef}
-          type="range"
-          min="0"
-          max={info ? info.duration.toFixed(2) : 1}
-          step="0.01"
-          defaultValue="0"
-          onChange={handleSeek}
-          disabled={!ready}
-          aria-label="再生位置"
-          className="flex-1 min-w-0 accent-[#4aa3ff]"
-        />
-        <span ref={clockRef} className={`${valCls} whitespace-nowrap text-[11px]`}>
-          0.0 / 0.0秒
-        </span>
-        <button onClick={() => setLoop((v) => !v)} className={`${btn} !px-2 !py-1.5 !text-[11px] ${loop ? btnOn : ""}`}>
-          くり返す
-        </button>
+      {/* 再生バー：上の段＝再生位置のスライダー（指でずらすと、レコードのように鳴る）・時間／下の段＝再生・速さ・くり返す */}
+      <div className="border-t border-[#2a313b] bg-[#161a20] px-2.5 py-2">
+        <div className="flex items-center gap-2">
+          <input
+            ref={seekRef}
+            type="range"
+            min="0"
+            max={info ? info.duration.toFixed(2) : 1}
+            step="0.01"
+            defaultValue="0"
+            onChange={handleSeek}
+            onPointerDown={scrubStart}
+            disabled={!ready}
+            aria-label="再生位置（指でずらすと、ずらす速さ・向きで、音が鳴ります）"
+            className="h-7 min-w-0 flex-1 accent-[#4aa3ff]"
+          />
+          <span ref={clockRef} className={`${valCls} whitespace-nowrap text-[11px]`}>
+            0.0 / 0.0秒
+          </span>
+        </div>
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <button onClick={togglePlay} disabled={!ready} className={`${btn} min-w-[78px] !py-2 font-semibold ${playing ? btnOn : ""}`}>
+            {playing ? "■ 停止" : "▶ 再生"}
+          </button>
+          <div className="flex items-center gap-1" role="group" aria-label="再生の速さ">
+            {RATES.map((r) => (
+              <button key={r} onClick={() => setRate(r)} disabled={!ready} className={`${btn} !px-2 !py-1.5 !text-[11px] tabular-nums ${rate === r ? btnOn : ""}`}>
+                ×{r}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setLoop((v) => !v)} className={`${btn} ml-auto !px-2 !py-1.5 !text-[11px] ${loop ? btnOn : ""}`}>
+            くり返す
+          </button>
+        </div>
+        {ready && scrubSupported() && (
+          <p className="mt-1.5 text-[10px] leading-relaxed text-[#93a0b0]">再生位置のバーを指でずらすと、レコードのように、ずらす速さ・向きで音が鳴ります（戻すと逆再生・止めると無音）。</p>
+        )}
       </div>
       {playError && <p className="bg-[#161a20] px-3 pb-2 text-[11px] text-[#F0B4AE] leading-relaxed">{playError}</p>}
 
@@ -433,6 +533,15 @@ export default function Spectrogram3D({ src, startSec = null, endSec = null, tit
                 音の強さ（黄＝強い）
               </button>
             </div>
+          </div>
+          <div>
+            <span className={titleCls}>スロー再生</span>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => setPitchKeep((v) => !v)} className={`${btn} ${pitchKeep ? btnOn : ""}`}>
+                音の高さを保つ
+              </button>
+            </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-[#93a0b0]">オフにすると、遅くするほど、音が低くなります（レコードのスロー再生のように）。</p>
           </div>
           <div>
             <span className={titleCls}>動かす</span>
