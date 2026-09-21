@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import BackLink from "./BackLink";
+import RecordingPlaceEditor from "./RecordingPlaceEditor";
 import { useLoginState } from "../lib/useLoginState";
 import { isNativeApp } from "../lib/offline";
 import { deleteRecording, listRecordings, playableUrl } from "../lib/recordingStore";
@@ -22,15 +23,24 @@ function whenText(meta) {
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+// 場所が、録音したときから変わっているか（変えたあと、元に戻したときは、変わっていない）
+function locationChanged(meta) {
+  const o = meta.locationOriginal;
+  const l = meta.location;
+  if (!o || !l) return false;
+  return o.latitude !== l.latitude || o.longitude !== l.longitude || (o.name ?? null) !== (l.name ?? null);
+}
+
 function locationText(l) {
   if (!l || l.latitude == null) return "場所なし";
   const src = l.source === "gps" ? "GPS" : l.source === "default" ? "デフォルト" : "手入力";
   return `${l.name || "名前なし"}（${src}・${l.latitude.toFixed(3)}, ${l.longitude.toFixed(3)}）`;
 }
 
-function Item({ meta, onDelete }) {
+function Item({ meta, onDelete, onChanged }) {
   const [url, setUrl] = useState(null);
   const [confirming, setConfirming] = useState(false);
+  const [editingPlace, setEditingPlace] = useState(false);
   const [busy, setBusy] = useState(false);
   const files = meta._files ?? { pcm: (meta.audio?.pcm?.samples ?? 0) * 2, aac: meta.audio?.aac?.bytes ?? 0 };
   const unfinished = meta.status === "recording"; // 録音中に、アプリが止まったもの
@@ -43,7 +53,11 @@ function Item({ meta, onDelete }) {
         <div className="text-[11px] font-bold tabular-nums text-inkMuted">{mmss(meta.durationSec)}</div>
       </div>
       <ul className="mt-1 text-[11px] leading-relaxed text-inkMuted">
-        <li>📍 {locationText(meta.location)}</li>
+        <li>
+          📍 {locationText(meta.location)}
+          {locationChanged(meta) && <span className="ml-1 text-[#2F8050]">（変更済み）</span>}
+        </li>
+        {meta.note && <li>📝 {meta.note}</li>}
         <li>🎙 {meta.recorder?.name ? `${meta.recorder.name}・` : ""}{deviceLabel(meta.device)}{meta.audio?.inputLabel ? `・${meta.audio.inputLabel}` : ""}</li>
         <li>
           🎧 正式な録音：{unfinished ? "（録音が、途中で止まりました）" : master === "aac" ? "別の録音（AAC）※無圧縮が途切れたため" : "無圧縮"}
@@ -66,12 +80,32 @@ function Item({ meta, onDelete }) {
           >
             ▶ 聞く
           </button>
+          {!editingPlace && (
+            <button className={smallBtn} onClick={() => setEditingPlace(true)}>
+              📍 場所を変える
+            </button>
+          )}
           {!confirming && (
             <button className={`${smallBtn} !text-red-500`} onClick={() => setConfirming(true)}>
               削除
             </button>
           )}
         </div>
+      )}
+      {url && !editingPlace && (
+        <button className={`${smallBtn} mt-2 mr-2`} onClick={() => setEditingPlace(true)}>
+          📍 場所を変える
+        </button>
+      )}
+      {editingPlace && (
+        <RecordingPlaceEditor
+          meta={meta}
+          onCancel={() => setEditingPlace(false)}
+          onSaved={() => {
+            setEditingPlace(false);
+            onChanged();
+          }}
+        />
       )}
       {url && !confirming && (
         <button className={`${smallBtn} mt-2 !text-red-500`} onClick={() => setConfirming(true)}>
@@ -147,6 +181,7 @@ export default function RecordingsList() {
           <Item
             key={m.id}
             meta={m}
+            onChanged={reload}
             onDelete={async (id) => {
               await deleteRecording(id);
               await reload();
