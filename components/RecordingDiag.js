@@ -5,6 +5,7 @@ import { Capacitor } from "@capacitor/core";
 import BackLink from "./BackLink";
 import { captureSupport, startPcmCapture } from "../lib/pcmCapture";
 import { LiveSpectrogram } from "../lib/liveSpectrogram";
+import { startSilentAudio } from "../lib/keepAlive";
 
 const card = "mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4";
 const btn = "w-full rounded-xl bg-[#3F6C74] text-white text-sm font-bold py-3 disabled:opacity-40";
@@ -99,6 +100,7 @@ export default function RecordingDiag() {
   const [level, setLevel] = useState(null);
   const [copied, setCopied] = useState(false);
   const [events, setEvents] = useState([]); // 出来事の記録（画面を消す・マイクが止まる、など）
+  const [keepAlive, setKeepAlive] = useState("both"); // 画面を消しても、音の処理を続けさせる工夫：none | audio | noise | both
   const canvasRef = useRef(null);
   const levelRef = useRef({ rms: -120, peak: -120 });
   const stopRef = useRef(false); // 「停止する」が押された
@@ -122,7 +124,7 @@ export default function RecordingDiag() {
 
   // 録音して、様子を測る。seconds 秒間（「停止する」で、途中で終えられる。そのときも、ここまでの結果を出す）。
   // bgMode：画面を消す試験。画面の表示・非表示・音の処理の状態の変化・再開の試み・時計の止まりを、すべて記録する
-  async function capture(seconds, { bgMode = false, save = false }) {
+  async function capture(seconds, { bgMode = false, save = false, silent = null, quietNoise = false }) {
     let spec = null;
     let cap = null;
     const chunks = [];
@@ -192,10 +194,14 @@ export default function RecordingDiag() {
 
     let raf = 0;
     let startedAt = 0;
+    let mr = null;
+    const mrInfo = { mime: null, chunks: 0, bytes: 0, lastT: null, maxGapSec: 0, error: null };
     try {
       if (bgMode) await requestWake();
+      if (silent) log(`無音の再生：${await silent.played}`);
       cap = await startPcmCapture({
         onEvent: log,
+        quietNoise,
         onChunk: (chunk, info) => {
           chunks.push(chunk);
           const gap = info.wallMs - lastWall;
@@ -216,6 +222,23 @@ export default function RecordingDiag() {
       });
       startedAt = Date.now();
       log(`録音を始めた（${cap.mode}・${cap.sampleRate}Hz）`);
+      // 観察：音の処理が中断されている間も、マイクの流れ（MediaRecorder）は、届き続けるか
+      if (bgMode && typeof MediaRecorder !== "undefined" && cap.stream) {
+        try {
+          mr = new MediaRecorder(cap.stream);
+          mrInfo.mime = mr.mimeType;
+          mr.ondataavailable = (e) => {
+            mrInfo.chunks += 1;
+            mrInfo.bytes += e.data.size;
+            const t = (Date.now() - t0) / 1000;
+            if (mrInfo.lastT !== null && t - mrInfo.lastT > mrInfo.maxGapSec) mrInfo.maxGapSec = t - mrInfo.lastT;
+            mrInfo.lastT = t;
+          };
+          mr.start(1000);
+        } catch (err) {
+          mrInfo.error = err?.message ?? String(err);
+        }
+      }
       const loop = () => {
         if (spec && canvasRef.current) spec.draw(canvasRef.current);
         setProgress(Math.min(seconds, Math.round((Date.now() - startedAt) / 100) / 10));
@@ -246,6 +269,12 @@ export default function RecordingDiag() {
       if (wake) wake.release().catch(() => {});
     }
     const trackStateEnd = cap?.trackState?.();
+    try {
+      if (mr && mr.state !== "inactive") mr.stop();
+    } catch {
+      // すでに止まっている
+    }
+    silent?.stop();
     await cap?.stop();
     log("録音を止めた");
 
@@ -267,6 +296,8 @@ export default function RecordingDiag() {
       rmsDb: 20 * Math.log10(Math.sqrt(sumSq / (count || 1)) + 1e-9),
       peakDb: 20 * Math.log10(peak + 1e-9),
       events: eventLog,
+      keepAlive: bgMode ? { silentAudio: !!silent, quietNoise } : null,
+      mediaRecorder: bgMode ? { mime: mrInfo.mime, chunks: mrInfo.chunks, bytes: mrInfo.bytes, maxGapSec: Math.round(mrInfo.maxGapSec * 10) / 10, error: mrInfo.error } : null,
       wakeResult,
       trackStateEnd,
     };
@@ -296,8 +327,10 @@ export default function RecordingDiag() {
   async function runBg() {
     setBusy("bg");
     setBg(null);
+    // 無音の再生は、ボタンを押した、その場で始める（iPhone は、操作の直後でないと、再生を許さない）
+    const silent = keepAlive === "audio" || keepAlive === "both" ? startSilentAudio() : null;
     try {
-      setBg(await capture(60, { bgMode: true }));
+      setBg(await capture(60, { bgMode: true, silent, quietNoise: keepAlive === "noise" || keepAlive === "both" }));
     } catch (err) {
       setBg({ error: `${err?.name ?? ""} ${err?.message ?? err}`.trim() });
     } finally {
@@ -472,6 +505,20 @@ export default function RecordingDiag() {
               <p className="text-[11px] text-inkMuted leading-relaxed mb-3">
                 押したら、<b>電源ボタンで画面を消して、20秒ほど待ってから、また点けてください</b>。録音が続いていたか（音が取れていたか）と、画面を消したときの出来事を、記録します。いつでも「停止する」で、止められます。
               </p>
+              <label className="mb-2 block text-[11px] text-ink">
+                <span className="font-bold">画面を消しても続けさせる工夫：</span>
+                <select
+                  value={keepAlive}
+                  onChange={(e) => setKeepAlive(e.target.value)}
+                  disabled={!!busy}
+                  className="mt-1 w-full rounded-lg border-2 border-cardBorder bg-white px-2 py-1.5 text-[12px]"
+                >
+                  <option value="both">無音の再生 ＋ ごく小さな音（両方）</option>
+                  <option value="audio">無音の再生だけ</option>
+                  <option value="noise">ごく小さな音だけ</option>
+                  <option value="none">なし（前回と同じ）</option>
+                </select>
+              </label>
               <button onClick={runBg} disabled={!!busy} className={btn}>
                 {busy === "bg" ? `測定中… ${progress ?? 0}秒 / 60秒` : "60秒のテストを始める"}
               </button>
@@ -487,6 +534,14 @@ export default function RecordingDiag() {
                     <Row tone="info" label="途切れた場所：" value={bg.gaps.length ? bg.gaps.map((g) => `${g.atSec}秒に${g.gapSec}秒`).join("、") : "なし"} />
                     {bg.stoppedEarly && <Row tone="info" label="止め方：" value="「停止する」で、途中で止めた" />}
                     <Row tone={bg.maxTickMs <= 1500 ? "ok" : "warn"} label="処理の止まり：" value={bg.maxTickMs > 1500 ? `画面を消している間、処理が最大 ${(bg.maxTickMs / 1000).toFixed(1)}秒 止まった` : "止まらなかった"} />
+                    {bg.mediaRecorder && (
+                      <Row
+                        tone={bg.mediaRecorder.error ? "ng" : "info"}
+                        label="別の録音（MediaRecorder）："
+                        value={bg.mediaRecorder.error ? bg.mediaRecorder.error : `${bg.mediaRecorder.chunks}個・${Math.round(bg.mediaRecorder.bytes / 1024)}KB（${bg.mediaRecorder.mime}）／最大の届かない時間 ${bg.mediaRecorder.maxGapSec}秒`}
+                      />
+                    )}
+                    {bg.keepAlive && <Row tone="info" label="使った工夫：" value={`無音の再生=${bg.keepAlive.silentAudio ? "あり" : "なし"}／ごく小さな音=${bg.keepAlive.quietNoise ? "あり" : "なし"}`} />}
                     <EventLog lines={bg.events} title="出来事の記録" />
                     <Row tone={bg.wakeResult?.startsWith("取得できた") ? "ok" : "warn"} label="画面を点けたまま：" value={bg.wakeResult ?? "対応していない"} />
                     <Row tone="info" label="終わりの状態：" value={JSON.stringify(bg.trackStateEnd)} />
