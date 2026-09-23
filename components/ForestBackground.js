@@ -8,8 +8,12 @@ import { usePathname } from "next/navigation";
 //    レイアウト（app/layout.js）の直下に、ずっと1つだけ置く（ページの部品としては、持たない）。
 //    こうすると、2つの画面をスワイプで行き来しても、この部品自体は作り直されない＝写真の要素（<img>）が
 //    一度も差し替わらないので、スワイプの瞬間に、背景が一瞬でも動いたり・暗くなったりすることが、原理的に起きない。
+//    暗さの層（オーバーレイ）も、ここに含める：以前は、各画面が自分の濃さ（25%・45%）で個別に重ねていたが、
+//    スワイプで切り替わる瞬間、写真は同じでも、この濃さがパッと切り替わって「カクッ」と見えていた。
+//    ここで固定の濃さにすることで、スワイプ中、背景（写真＋暗さ）が本当に一切変わらなくなる。
 //    表示するのは、この2画面のときだけ（他の画面では、何も描かない）。
 const FOREST_PAGES = new Set(["/", "/record"]);
+const OVERLAY_OPACITY = "bg-black/30";
 
 export default function ForestBackground() {
   const pathname = usePathname();
@@ -38,6 +42,7 @@ export default function ForestBackground() {
       }}
     >
       <Image src="/forest-bg.jpg" alt="" fill priority sizes="100vw" className="object-cover" />
+      <div className={`absolute inset-0 ${OVERLAY_OPACITY}`} />
     </div>
   );
 }

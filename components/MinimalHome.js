@@ -189,10 +189,6 @@ function MinimalHomeInner({ promptLogin = false }) {
 
   return (
     <div className="relative w-full overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
-      {/* 背景の写真そのものは、共通の部品（components/ForestBackground.js・app/layout.js に配置）が描く。
-          ここでは、その上に重ねる、暗さだけを出す（写真の要素は、この画面では一切作らない・持たない） */}
-      <div className="fixed inset-0 z-0 bg-black/25" />
-
       {/* コンテンツ：タイトル〜一覧のまとまりの中心が、画面の縦センターから15%上に来るよう、
           実際の高さを測ってpaddingTopで調整する（absolute配置だと中身が伸びたときに
           画面の外へはみ出す問題があったため、この方式に変更） */}

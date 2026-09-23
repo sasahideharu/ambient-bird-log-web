@@ -296,10 +296,6 @@ export default function RecordScreen() {
 
   return (
     <div className="relative w-full overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
-      {/* 背景の写真そのものは、共通の部品（components/ForestBackground.js・app/layout.js に配置）が描く。
-          ここでは、その上に重ねる、暗さだけを出す（写真の要素は、この画面では一切作らない・持たない） */}
-      <div className="fixed inset-0 z-0 bg-black/45" />
-
       <div className="abl-page-safe relative z-10 flex min-h-screen w-full justify-center px-6 pb-10" style={swipeStyle}>
         <div className="w-full max-w-sm">
           <div className="flex items-center justify-between px-1">
