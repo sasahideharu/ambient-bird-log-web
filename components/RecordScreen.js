@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import Image from "next/image";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BackLink from "./BackLink";
@@ -65,7 +64,6 @@ export default function RecordScreen() {
   const [liveAgg, setLiveAgg] = useState(emptyLive());
   const [liveState, setLiveState] = useState(null);
   const [warm, setWarm] = useState("idle"); // idle | warming | ready | failed（解析サーバーを起こした結果）
-  const [bgHeight, setBgHeight] = useState(null);
   const canvasRef = useRef(null);
   const ctrlRef = useRef(null);
   const engineRef = useRef(null);
@@ -90,12 +88,6 @@ export default function RecordScreen() {
     transform: swipePercent > 0 ? `translateX(-${swipePercent * 100}%)` : undefined,
     transition: swiping ? "none" : "transform 320ms ease-out",
   };
-
-  // 🔥 トップページと同じ、背景の写真が縮んで見えないようにする工夫（InstagramやLINEのアプリ内ブラウザ対策）
-  useLayoutEffect(() => {
-    if (typeof window === "undefined") return;
-    setBgHeight(window.innerHeight + 160);
-  }, []);
 
   useEffect(() => {
     setSettings(loadSettings());
@@ -303,15 +295,10 @@ export default function RecordScreen() {
   const warmText = warm === "warming" ? "☁ 解析サーバーを起こしています…" : warm === "ready" ? "☁ 解析サーバー：準備OK" : warm === "failed" ? "☁ 解析サーバー：つながりません" : null;
 
   return (
-    <div className="relative w-full overflow-x-hidden bg-black" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
-      {/* 背景：トップページと同じ、森の写真（sticky で、アドレスバーの伸縮にも安定して追従する） */}
-      <div
-        className="sticky top-0 z-0 w-full"
-        style={{ height: bgHeight ? `${bgHeight}px` : "100vh", marginBottom: bgHeight ? `-${bgHeight}px` : "-100vh" }}
-      >
-        <Image src="/forest-bg.jpg" alt="" fill priority sizes="100vw" className="object-cover" />
-        <div className="absolute inset-0 bg-black/45" />
-      </div>
+    <div className="relative w-full overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
+      {/* 背景の写真そのものは、共通の部品（components/ForestBackground.js・app/layout.js に配置）が描く。
+          ここでは、その上に重ねる、暗さだけを出す（写真の要素は、この画面では一切作らない・持たない） */}
+      <div className="fixed inset-0 z-0 bg-black/45" />
 
       <div className="abl-page-safe relative z-10 flex min-h-screen w-full justify-center px-6 pb-10" style={swipeStyle}>
         <div className="w-full max-w-sm">

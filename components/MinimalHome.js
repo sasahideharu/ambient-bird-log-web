@@ -1,10 +1,9 @@
 "use client";
 
 import { Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { canGoBackInApp, hasNavigatedInApp } from "../lib/backNav";
+import { canGoBackInApp } from "../lib/backNav";
 import { useSwipeNav } from "../lib/useSwipeNav";
 import { fetchDetections, fetchBirdImages, getRemoteAudioUrl } from "../lib/queries";
 import { forgetSpectrogram } from "../lib/spectrogram3dData";
@@ -64,12 +63,7 @@ function MinimalHomeInner({ promptLogin = false }) {
   const [birdImages, setBirdImages] = useState([]);
   const [keyword, setKeyword] = useState("");
 
-  // 🔥 背景の写真を、透明から浮かび上がらせる演出は、アプリを開いた最初の1回だけ。
-  //    2回目以降（録音画面からスワイプで戻ってきたときなど）は、最初から見えている状態にする
-  //    （毎回、写真が透明→浮かび上がる、をやり直すと、その一瞬、下地の黒が見えてしまうため）
-  const [bgRevealed, setBgRevealed] = useState(() => hasNavigatedInApp());
   const [contentRevealed, setContentRevealed] = useState(false);
-  const [bgHeight, setBgHeight] = useState(null);
   // 🔥 鳥の窓は、画面の住所（?bird=鳥の名前）と連動させる。開くと履歴が1つ増え、「×」で1つ戻る。
   //    こうすると、窓から別の画面（3D の全画面・音声の編集）へ行って戻ったとき、鳥の窓が開いた状態に戻る（トップまで戻らない）
   const selectedSpecies = params.get("bird");
@@ -139,14 +133,6 @@ function MinimalHomeInner({ promptLogin = false }) {
     };
   }, [recomputePadding]);
 
-  // 🔥 InstagramやLINEのアプリ内ブラウザ・Safariは、スクロール中にアドレスバーが伸び縮みして
-  //    画面の高さがその都度変わる。背景の高さを、そのたびに測り直すと、背景が動いて（伸び縮みして）見えてしまう。
-  //    なので、最初に一度だけ画面の高さを測って固定値（px）として使い、以後は測り直さない。
-  useLayoutEffect(() => {
-    if (typeof window === "undefined") return;
-    setBgHeight(window.innerHeight + 160);
-  }, []);
-
   // 🔥 オフライン保存・削除のあとにも呼んで、写真などの参照先（ネット／端末内）を最新にする
   const loadData = useCallback(async () => {
     try {
@@ -185,15 +171,9 @@ function MinimalHomeInner({ promptLogin = false }) {
   }, [rawDetections, birdImages]);
 
   useEffect(() => {
-    // 文字・検索窓・一覧の、ゆっくりの登場効果は、毎回（2回目以降も）そのまま再生する
+    // 文字・検索窓・一覧の、ゆっくりの登場効果は、毎回、そのまま再生する
     const t2 = setTimeout(() => setContentRevealed(true), 650);
-    // 背景の写真の登場効果（透明→浮かび上がる）だけは、最初の1回に限る（上のuseStateを参照）
-    if (hasNavigatedInApp()) return () => clearTimeout(t2);
-    const t1 = setTimeout(() => setBgRevealed(true), 80);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
+    return () => clearTimeout(t2);
   }, []);
 
   const visible = useMemo(() => {
@@ -208,33 +188,10 @@ function MinimalHomeInner({ promptLogin = false }) {
   }, [rawDetections, birdImages, keyword, orderMap]);
 
   return (
-    <div className="relative w-full bg-black overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
-      {/* 背景：position: fixed（画面に貼り付ける）＋ 一度だけ測った高さ（px に固定）。
-          ・fixed は、一覧がどれだけ長くても、常に画面のその場所に居続ける（sticky と違い「くっつく範囲」を使い切って
-          　剥がれる、ということが無い）→ 最後までスクロールしても、背景が途切れない
-          ・高さを、アドレスバーの伸縮のたびに測り直さず、最初に一度だけ測った値（画面の高さ＋少し）に固定する
-          　→ SafariやAndroid Chromeで、スクロール中にアドレスバーが伸び縮みしても、背景の大きさが変わらない（動いて見えない）
-          ・録音画面と同じ「画面の高さ＋160px」を使うので、一覧の長さに関わらず、常にひとつの画面ぶんの大きさのまま
-          　（object-coverが引き伸ばされて拡大されて見えることも無い） */}
-      <div
-        className={`fixed top-0 left-0 w-full z-0 ${
-          bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
-        }`}
-        style={{
-          transition: "opacity 2600ms ease-out, filter 2600ms ease-out",
-          height: bgHeight ? `${bgHeight}px` : "100vh",
-        }}
-      >
-        <Image
-          src="/forest-bg.jpg"
-          alt=""
-          fill
-          priority
-          sizes="100vw"
-          className="object-cover"
-        />
-        <div className="absolute inset-0 bg-black/25" />
-      </div>
+    <div className="relative w-full overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
+      {/* 背景の写真そのものは、共通の部品（components/ForestBackground.js・app/layout.js に配置）が描く。
+          ここでは、その上に重ねる、暗さだけを出す（写真の要素は、この画面では一切作らない・持たない） */}
+      <div className="fixed inset-0 z-0 bg-black/25" />
 
       {/* コンテンツ：タイトル〜一覧のまとまりの中心が、画面の縦センターから15%上に来るよう、
           実際の高さを測ってpaddingTopで調整する（absolute配置だと中身が伸びたときに
