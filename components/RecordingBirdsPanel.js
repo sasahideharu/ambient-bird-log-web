@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { summarizeStoredLive } from "../lib/liveSpecies";
 import { loadSpeciesChoices, addEyeWitness, removeEyeWitness } from "../lib/recordingBirds";
 import { loadSpeciesJaNames } from "../lib/speciesNames";
+import { canAnalyzeLater, runLaterAnalysis, summarizeLaterAnalysis } from "../lib/laterAnalysis";
 
 const inputClass = "w-full px-3 py-2 rounded-xl border-[3px] border-cardBorder bg-white text-sm text-ink outline-none focus:border-accent";
 const smallBtn = "rounded-full border-2 border-cardBorder bg-page px-3 py-1.5 text-[11px] font-bold text-[#3F6C74] hover:border-accent disabled:opacity-40";
@@ -17,11 +18,30 @@ export default function RecordingBirdsPanel({ meta, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [jaNames, setJaNames] = useState(null); // 学名→和名（古い録音〔和名を保存していない版〕の、日本語表示のため）
+  const [laterStage, setLaterStage] = useState(null); // あとで解析：進み具合（null＝動いていない）
+  const [laterError, setLaterError] = useState(null);
 
   useEffect(() => {
     loadSpeciesChoices().then(setChoices);
     loadSpeciesJaNames().then(setJaNames);
   }, []);
+
+  const laterResult = useMemo(() => summarizeLaterAnalysis(meta.laterAnalysis), [meta.laterAnalysis]);
+  const laterStageText = { reading: "音を読み込み中…", decoding: "音を元の波形に戻しています…", encoding: "MP3に変換中…", uploading: "送信中…", analyzing: "解析中…（数十秒かかります）" };
+
+  async function startLaterAnalysis() {
+    setLaterError(null);
+    setLaterStage("reading");
+    try {
+      const next = await runLaterAnalysis(meta, { onProgress: (p) => setLaterStage(p.stage) });
+      onSaved?.(next);
+    } catch (err) {
+      console.error(err);
+      setLaterError(err?.message ?? String(err));
+    } finally {
+      setLaterStage(null);
+    }
+  }
 
   const detected = useMemo(() => {
     const list = summarizeStoredLive(meta.live);
@@ -104,6 +124,35 @@ export default function RecordingBirdsPanel({ meta, onSaved }) {
         </ul>
       )}
       <p className="mt-1 text-[10px] leading-relaxed text-inkMuted">音だけの解析です。正式な記録ではありません。</p>
+
+      <div className="mt-3 text-[11px] font-bold text-ink">あとで解析（本番と同じ解析）</div>
+      {meta.laterAnalysis ? (
+        <>
+          <p className="mt-1 text-[10px] text-inkMuted">{new Date(meta.laterAnalysis.analyzedAt).toLocaleString("ja-JP")} に解析</p>
+          {laterResult.length === 0 ? (
+            <p className="mt-1 text-[11px] leading-relaxed text-inkMuted">見つかりませんでした。</p>
+          ) : (
+            <ul className="mt-1 flex flex-col gap-1">
+              {laterResult.map((s) => (
+                <li key={s.sci} className="rounded-lg bg-[#DDF3E4] px-2 py-1 text-[11px] font-bold leading-relaxed text-[#1F5E3A]">
+                  {s.common ?? s.sci}（{Math.round(s.confidence * 100)}%）
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1 text-[10px] leading-relaxed text-inkMuted">音だけの解析です。まだ登録（公開）はされていません。</p>
+        </>
+      ) : canAnalyzeLater(meta) ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-inkMuted">まだ、していません。</p>
+      ) : (
+        <p className="mt-1 text-[11px] leading-relaxed text-inkMuted">この録音は、途中で止まったため、あとで解析できません。</p>
+      )}
+      {canAnalyzeLater(meta) && (
+        <button onClick={startLaterAnalysis} disabled={!!laterStage} className={`${smallBtn} mt-2`}>
+          {laterStage ? laterStageText[laterStage] : meta.laterAnalysis ? "☁ もう一度解析する" : "☁ あとで解析する"}
+        </button>
+      )}
+      {laterError && <p className="mt-1.5 text-[11px] leading-relaxed text-red-500">{laterError}</p>}
 
       <div className="mt-3 text-[11px] font-bold text-ink">目で見た鳥</div>
       {witnessed.length === 0 ? (
