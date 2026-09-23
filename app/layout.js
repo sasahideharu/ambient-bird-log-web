@@ -1,4 +1,4 @@
-import { Josefin_Sans } from "next/font/google";
+import { Josefin_Sans, Share_Tech_Mono } from "next/font/google";
 import "./globals.css";
 import { Suspense } from "react";
 import NavTracker from "../components/NavTracker";
@@ -11,6 +11,14 @@ const josefin = Josefin_Sans({
   weight: ["300", "400", "500"],
   display: "swap",
   variable: "--font-josefin",
+});
+
+// 🔥 録音画面のステータス表示（OK | GPS など）用の、等幅フォント（Share Tech Mono）
+const shareTechMono = Share_Tech_Mono({
+  subsets: ["latin"],
+  weight: ["400"],
+  display: "swap",
+  variable: "--font-share-tech-mono",
 });
 
 export const metadata = {
@@ -29,7 +37,7 @@ export const viewport = {
 const isApp = process.env.BUILD_TARGET === "app";
 
 export default function RootLayout({ children }) {
-  const htmlClass = [josefin.variable, isApp ? "abl-app" : ""].filter(Boolean).join(" ");
+  const htmlClass = [josefin.variable, shareTechMono.variable, isApp ? "abl-app" : ""].filter(Boolean).join(" ");
   return (
     <html lang="ja" className={htmlClass}>
       <body className="font-body text-ink">

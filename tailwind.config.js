@@ -33,6 +33,7 @@ module.exports = {
           "sans-serif",
         ],
         hero: ["var(--font-josefin)", "'Josefin Sans'", "sans-serif"],
+        statusMono: ["var(--font-share-tech-mono)", "'Share Tech Mono'", "monospace"],
       },
     },
   },

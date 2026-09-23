@@ -42,6 +42,97 @@ function TriangleIcon({ direction }) {
   );
 }
 
+// 乱数で、向き・速さを変えながら、なめらかに動き続ける、1つの軸ぶんの角度（3〜5秒ごとに、次の目標へ）
+function makeAxis(startVel) {
+  return { angle: Math.random() * 360, vel: startVel, target: startVel, until: 0 };
+}
+function stepAxis(a, now, dt, maxSpeed) {
+  if (now > a.until) {
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    a.target = dir * (maxSpeed * 0.2 + Math.random() * maxSpeed * 0.8);
+    a.until = now + 3000 + Math.random() * 2000;
+  }
+  a.vel += (a.target - a.vel) * Math.min(1, dt * 0.5);
+  a.angle += a.vel * dt;
+  return a.angle;
+}
+
+// 乱数で、min〜maxの間を、なめらかに行ったり来たりし続ける、1つの値（1.5〜4秒ごとに、次の目標へ）
+function makeValue(start) {
+  return { value: start, target: start, until: 0 };
+}
+function stepValue(v, now, dt, min, max) {
+  if (now > v.until) {
+    v.target = min + Math.random() * (max - min);
+    v.until = now + 1500 + Math.random() * 2500;
+  }
+  v.value += (v.target - v.value) * Math.min(1, dt * 1.2);
+  return v.value;
+}
+
+// 🔥 録音ボタンの、丸を取り囲む2本の線（実線）と、中心の丸い面。
+//    線：X軸・Y軸とも、乱数で向き・速さを変えながら、傾き続ける＝輪そのものが、奥行きのある向きへ、
+//        絶えず傾き回る（土星の輪が転がるような、3次元の動き）。濃さ・大きさも、2本それぞれ、乱数で不規則に変わる。
+//    中心の面：濃さ（不透明度）・大きさを、乱数で「薄い／小さい」〜「今の濃さ・大きさ（一番濃い・一番大きい）」の間で、ゆっくり揺らす
+const RING_MAX_SPEED = 44; // 度／秒（もとの2倍）
+const RING_MIN_OPACITY = 0.15;
+const RING_MAX_OPACITY = 0.7; // もとの固定の濃さ
+const RING_MIN_SCALE = 0.55;
+const RING_MAX_SCALE = 1; // もとの固定の大きさ
+const CENTER_MIN_OPACITY = 0.06;
+const CENTER_MAX_OPACITY = 0.25;
+const CENTER_MIN_SCALE = 0.55;
+const CENTER_MAX_SCALE = 1; // もとの固定の大きさ
+function SpinningRings() {
+  const ref1 = useRef(null);
+  const ref2 = useRef(null);
+  const centerRef = useRef(null);
+  useEffect(() => {
+    const rings = [
+      { el: ref1, x: makeAxis(9), y: makeAxis(-7), op: makeValue(RING_MAX_OPACITY), scale: makeValue(RING_MAX_SCALE) },
+      { el: ref2, x: makeAxis(-8), y: makeAxis(10), op: makeValue(RING_MAX_OPACITY), scale: makeValue(RING_MAX_SCALE) },
+    ];
+    const centerOpacity = makeValue(CENTER_MAX_OPACITY);
+    const centerScale = makeValue(CENTER_MAX_SCALE);
+    let raf;
+    let last = performance.now();
+    const tick = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      for (const r of rings) {
+        const x = stepAxis(r.x, now, dt, RING_MAX_SPEED);
+        const y = stepAxis(r.y, now, dt, RING_MAX_SPEED);
+        const op = stepValue(r.op, now, dt, RING_MIN_OPACITY, RING_MAX_OPACITY);
+        const sc = stepValue(r.scale, now, dt, RING_MIN_SCALE, RING_MAX_SCALE);
+        if (r.el.current) {
+          r.el.current.style.transform = `rotateX(${x}deg) rotateY(${y}deg) scale(${sc})`;
+          r.el.current.style.opacity = op;
+        }
+      }
+      const centerOp = stepValue(centerOpacity, now, dt, CENTER_MIN_OPACITY, CENTER_MAX_OPACITY);
+      const centerSc = stepValue(centerScale, now, dt, CENTER_MIN_SCALE, CENTER_MAX_SCALE);
+      if (centerRef.current) {
+        centerRef.current.style.opacity = centerOp;
+        centerRef.current.style.transform = `scale(${centerSc})`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div className="absolute inset-0" style={{ perspective: "320px" }}>
+      <svg ref={ref1} className="absolute inset-0" viewBox="0 0 160 160" style={{ transformOrigin: "50% 50%" }} aria-hidden="true">
+        <circle cx="80" cy="80" r="78.5" fill="none" stroke="white" strokeWidth="1.5" />
+      </svg>
+      <svg ref={ref2} className="absolute inset-[10px]" viewBox="0 0 140 140" style={{ transformOrigin: "50% 50%" }} aria-hidden="true">
+        <circle cx="70" cy="70" r="68.5" fill="none" stroke="white" strokeWidth="1.5" />
+      </svg>
+      <span ref={centerRef} className="absolute inset-5 rounded-full bg-white" style={{ opacity: CENTER_MAX_OPACITY }} />
+    </div>
+  );
+}
+
 // 場所の状態 → 録音の情報に入れる形
 function toMetaLocation(loc) {
   if (!loc || loc.status === "checking" || loc.latitude == null) {
@@ -309,9 +400,9 @@ export default function RecordScreen() {
   // 🔥 たたんだ表示・録音中の表示で使う、英語の短いステータス（機器の読み取りふうの見た目）
   const gpsOk = loc.status === "gps" || loc.status === "default";
   const gpsDetail = loc.status === "gps" ? `~${Math.round(loc.accuracyM ?? 0)}m` : loc.status === "default" ? "default" : loc.status === "checking" ? "…" : "none";
-  const analysisText = warm === "ready" ? "OK" : warm === "warming" ? "…" : warm === "failed" ? "NG" : "—";
+  const analysisText = warm === "ready" ? "OK" : warm === "warming" ? "--" : warm === "failed" ? "NG" : "--";
   const statusLines = [
-    `${gpsOk ? "OK" : "…"} | GPS / ${gpsDetail}`,
+    `${gpsOk ? "OK" : "--"} | GPS / ${gpsDetail}`,
     `${online ? "OK" : "NG"} | Mobile NetWork`,
     `${liveOn ? "ON" : "OFF"} | Live Analysis`,
     `${liveOn ? analysisText : "OFF"} | Analysis Server Connection`,
@@ -330,11 +421,13 @@ export default function RecordScreen() {
               画面より少しだけ長くなり、本来は要らない縦スクロールが、わずかにできてしまっていた） */}
           {collapsedIdle && (
             <div className="absolute inset-0">
-              <div className="absolute left-0 right-0 text-[11px] leading-relaxed text-white/85" style={{ top: "27%" }}>
+              <div className="absolute left-0 right-0 pl-6 font-hero text-[11px] leading-relaxed text-white/85" style={{ top: "27%" }}>
                 <div className="font-bold">Ambient Bird Log - Analysis</div>
                 <div className="text-white/40">—</div>
                 {statusLines.map((line) => (
-                  <div key={line}>{line}</div>
+                  <div key={line} className="font-statusMono">
+                    {line}
+                  </div>
                 ))}
               </div>
               <button
@@ -352,9 +445,7 @@ export default function RecordScreen() {
                 className="absolute left-1/2 flex h-40 w-40 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full disabled:opacity-50"
                 style={{ top: "58%" }}
               >
-                <span className="absolute inset-0 rounded-full border border-white/70" />
-                <span className="absolute inset-[10px] rounded-full border border-white/70" />
-                <span className="absolute inset-5 rounded-full bg-white/25" />
+                <SpinningRings />
               </button>
               {phase === "starting" && (
                 <p className="absolute left-1/2 -translate-x-1/2 text-[11px] text-white/70" style={{ top: "calc(58% + 100px)" }}>
@@ -385,7 +476,9 @@ export default function RecordScreen() {
                 <div className="font-bold">Ambient Bird Log - Analysis</div>
                 <div className="text-white/40">—</div>
                 {statusLines.map((line) => (
-                  <div key={line}>{line}</div>
+                  <div key={line} className="font-statusMono">
+                    {line}
+                  </div>
                 ))}
               </div>
               <canvas ref={canvasRef} width={640} height={280} className="mt-3 block w-full" />
