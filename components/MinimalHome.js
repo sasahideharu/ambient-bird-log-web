@@ -4,7 +4,8 @@ import { Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useCal
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { canGoBackInApp } from "../lib/backNav";
+import { canGoBackInApp, hasNavigatedInApp } from "../lib/backNav";
+import { useSwipeNav } from "../lib/useSwipeNav";
 import { fetchDetections, fetchBirdImages, getRemoteAudioUrl } from "../lib/queries";
 import { forgetSpectrogram } from "../lib/spectrogram3dData";
 import { useLoginState } from "../lib/useLoginState";
@@ -66,6 +67,12 @@ function MinimalHomeInner({ promptLogin = false }) {
   const [bgRevealed, setBgRevealed] = useState(false);
   const [contentRevealed, setContentRevealed] = useState(false);
   const [bgHeight, setBgHeight] = useState(null);
+  // 🔥 派手な入場演出（タイトル→検索→一覧の順に、ゆっくり浮かび上がる）は、アプリを開いた、その最初の1回だけ。
+  //    録音画面からスワイプで戻ってきたときなど、2回目以降は、さっと出す（毎回、何秒も待たせないように）
+  const [firstOpen] = useState(() => !hasNavigatedInApp());
+  const timing = firstOpen
+    ? { bg: 80, content: 650, title: 300, subtitle: 900, search: 2400, grid: 5200 }
+    : { bg: 0, content: 120, title: 0, subtitle: 60, search: 140, grid: 220 };
   // 🔥 鳥の窓は、画面の住所（?bird=鳥の名前）と連動させる。開くと履歴が1つ増え、「×」で1つ戻る。
   //    こうすると、窓から別の画面（3D の全画面・音声の編集）へ行って戻ったとき、鳥の窓が開いた状態に戻る（トップまで戻らない）
   const selectedSpecies = params.get("bird");
@@ -89,6 +96,17 @@ function MinimalHomeInner({ promptLogin = false }) {
     setIsApp(isNativeApp());
     return onUsingSavedChange(setUsingSaved);
   }, []);
+
+  // 🔥 左から右へスワイプすると、録音画面へ戻る（ログイン中のアプリだけ。録音画面から、右から左へスワイプして来た、その逆）
+  const { dragPercent: swipePercent, dragging: swiping, handlers: swipeHandlers } = useSwipeNav({
+    direction: "right",
+    enabled: isApp && login.loggedIn,
+    onCommit: () => router.push("/record"),
+  });
+  const swipeStyle = {
+    transform: swipePercent > 0 ? `translateX(${swipePercent * 100}%)` : undefined,
+    transition: swiping ? "none" : "transform 320ms ease-out",
+  };
 
   // 🔥 アプリを開いたとき：編集して公開した録音を、編集し直したものがあれば、保存済みのコピーを新しいものに入れ替える
   //    （そのままだと、編集前の音が出続ける）。電波が無いときは、何もしない
@@ -171,12 +189,13 @@ function MinimalHomeInner({ promptLogin = false }) {
   }, [rawDetections, birdImages]);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setBgRevealed(true), 80);
-    const t2 = setTimeout(() => setContentRevealed(true), 650);
+    const t1 = setTimeout(() => setBgRevealed(true), timing.bg);
+    const t2 = setTimeout(() => setContentRevealed(true), timing.content);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const visible = useMemo(() => {
@@ -191,7 +210,7 @@ function MinimalHomeInner({ promptLogin = false }) {
   }, [rawDetections, birdImages, keyword, orderMap]);
 
   return (
-    <div className="relative w-full bg-black">
+    <div className="relative w-full bg-black overflow-x-hidden" {...swipeHandlers}>
       {/* 背景：sticky + 負のマージンで「固定に見える」ようにする。
           position: fixed だとAndroidのChromeでアドレスバーの伸縮時に位置がズレることがあるため、
           スクロールの動きに素直に追従するstickyの方が両OSで安定する */}
@@ -219,20 +238,20 @@ function MinimalHomeInner({ promptLogin = false }) {
       {/* コンテンツ：タイトル〜一覧のまとまりの中心が、画面の縦センターから15%上に来るよう、
           実際の高さを測ってpaddingTopで調整する（absolute配置だと中身が伸びたときに
           画面の外へはみ出す問題があったため、この方式に変更） */}
-      <div className="relative z-10 min-h-screen w-full flex flex-col items-center px-6 pb-10">
+      <div className="relative z-10 min-h-screen w-full flex flex-col items-center px-6 pb-10" style={swipeStyle}>
         <div className="w-full max-w-sm flex flex-col items-center">
         <div style={{ paddingTop }}>
           <h1
             ref={titleRef}
             className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
-            style={{ transitionDelay: "300ms" }}
+            style={{ transitionDelay: `${timing.title}ms`, transitionDuration: firstOpen ? undefined : "500ms" }}
           >
             Ambient Bird Log
           </h1>
         </div>
         <p
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-center mt-2`}
-          style={{ transitionDelay: "900ms" }}
+          style={{ transitionDelay: `${timing.subtitle}ms`, transitionDuration: firstOpen ? undefined : "500ms" }}
         >
           <span className="block text-[10px] tracking-[2px]">by Hideharu Sasa</span>
           <span className="block text-[7px] tracking-[1.5px] mt-1 opacity-80">from Angle Matters</span>
@@ -240,7 +259,7 @@ function MinimalHomeInner({ promptLogin = false }) {
 
         <div
           className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full mt-10`}
-          style={{ transitionDelay: "2400ms", transitionDuration: "2000ms" }}
+          style={{ transitionDelay: `${timing.search}ms`, transitionDuration: firstOpen ? "2000ms" : "500ms" }}
         >
           <input
             type="text"
@@ -253,7 +272,7 @@ function MinimalHomeInner({ promptLogin = false }) {
 
         <div
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full mt-6 grid grid-cols-3 gap-2`}
-          style={{ transitionDelay: "5200ms", transitionDuration: "2000ms" }}
+          style={{ transitionDelay: `${timing.grid}ms`, transitionDuration: firstOpen ? "2000ms" : "500ms" }}
         >
           {visible.map((s) => (
             <MinimalThumb key={s.name} species={s} onSelect={openBird} />
@@ -270,7 +289,7 @@ function MinimalHomeInner({ promptLogin = false }) {
       {/* フッター：白い帯にInstagramアイコンと著作権表記 */}
       <div
         className="relative z-10 w-full bg-white pt-6 flex flex-col items-center justify-center gap-3"
-        style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
+        style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))", ...swipeStyle }}
       >
         {/* ログインの有無で、使えるものを分ける（ログイン中だけ、緯度経度・地図・管理画面・オフライン保存） */}
         {login.ready && (

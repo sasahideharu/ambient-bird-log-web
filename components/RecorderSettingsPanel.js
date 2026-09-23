@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { loadPlaces } from "../lib/geo";
 import { saveSettings } from "../lib/recorderSettings";
 
-const inputClass = "w-full px-3 py-2 rounded-xl border-[3px] border-cardBorder bg-white text-sm text-ink outline-none focus:border-accent";
-const smallBtn = "rounded-full border-2 border-cardBorder bg-page px-3 py-1.5 text-[11px] font-bold text-[#3F6C74] hover:border-accent disabled:opacity-40";
+const inputClass = "w-full px-3 py-2 rounded-xl border border-white/25 bg-white/10 text-sm text-white outline-none placeholder:text-white/40 focus:border-white/60";
+const smallBtn = "rounded-full border border-white/30 bg-white/10 px-3 py-1.5 text-[11px] font-bold text-white hover:border-white/60 disabled:opacity-40";
 
 // 録音の設定（録音者名・デフォルトの場所）。変えると、すぐ、この端末に保存される。
 //   デフォルトの場所は、位置情報（GPS）が取れなかったときに、録音の場所として使う
@@ -36,7 +36,7 @@ export default function RecorderSettingsPanel({ settings, onChange, currentPosit
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <div className="text-[11px] font-bold text-ink mb-1">録音者の名前</div>
+        <div className="text-[11px] font-bold text-white/85 mb-1">録音者の名前</div>
         <input
           value={settings.recorderName}
           onChange={(e) => update({ ...settings, recorderName: e.target.value })}
@@ -44,12 +44,12 @@ export default function RecorderSettingsPanel({ settings, onChange, currentPosit
           maxLength={40}
           className={inputClass}
         />
-        <p className="mt-1 text-[10px] text-inkMuted leading-relaxed">録音の記録に「誰が」として残ります（管理者だけに見えます）。</p>
+        <p className="mt-1 text-[10px] text-white/55 leading-relaxed">録音の記録に「誰が」として残ります（管理者だけに見えます）。</p>
       </div>
 
       <div>
-        <div className="text-[11px] font-bold text-ink mb-1">デフォルトの場所</div>
-        <p className="mb-2 text-[10px] text-inkMuted leading-relaxed">位置情報（GPS）が取れなかったときに、この場所を、録音の場所として使います。</p>
+        <div className="text-[11px] font-bold text-white/85 mb-1">デフォルトの場所</div>
+        <p className="mb-2 text-[10px] text-white/55 leading-relaxed">位置情報（GPS）が取れなかったときに、この場所を、録音の場所として使います。</p>
 
         <select
           value=""
@@ -60,9 +60,11 @@ export default function RecorderSettingsPanel({ settings, onChange, currentPosit
           className={`${inputClass} mb-2`}
           disabled={placesLoading || places.length === 0}
         >
-          <option value="">{placesLoading ? "これまでの場所を読み込み中…" : places.length === 0 ? "これまでの場所（取得できませんでした）" : "これまでの場所から選ぶ…"}</option>
+          <option value="" className="text-ink">
+            {placesLoading ? "これまでの場所を読み込み中…" : places.length === 0 ? "これまでの場所（取得できませんでした）" : "これまでの場所から選ぶ…"}
+          </option>
           {places.map((p) => (
-            <option key={p.name} value={p.name}>
+            <option key={p.name} value={p.name} className="text-ink">
               {p.name}
             </option>
           ))}
@@ -101,7 +103,7 @@ export default function RecorderSettingsPanel({ settings, onChange, currentPosit
             </button>
           )}
         </div>
-        {dl && (dl.latitude === null || dl.longitude === null) && <p className="mt-1 text-[10px] text-red-500">緯度と経度が、両方入るまで、使われません。</p>}
+        {dl && (dl.latitude === null || dl.longitude === null) && <p className="mt-1 text-[10px] text-[#F0B4AE]">緯度と経度が、両方入るまで、使われません。</p>}
       </div>
     </div>
   );
