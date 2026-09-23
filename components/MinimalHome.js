@@ -69,6 +69,7 @@ function MinimalHomeInner({ promptLogin = false }) {
   //    （毎回、写真が透明→浮かび上がる、をやり直すと、その一瞬、下地の黒が見えてしまうため）
   const [bgRevealed, setBgRevealed] = useState(() => hasNavigatedInApp());
   const [contentRevealed, setContentRevealed] = useState(false);
+  const [bgHeight, setBgHeight] = useState(null);
   // 🔥 鳥の窓は、画面の住所（?bird=鳥の名前）と連動させる。開くと履歴が1つ増え、「×」で1つ戻る。
   //    こうすると、窓から別の画面（3D の全画面・音声の編集）へ行って戻ったとき、鳥の窓が開いた状態に戻る（トップまで戻らない）
   const selectedSpecies = params.get("bird");
@@ -138,6 +139,14 @@ function MinimalHomeInner({ promptLogin = false }) {
     };
   }, [recomputePadding]);
 
+  // 🔥 InstagramやLINEのアプリ内ブラウザ・Safariは、スクロール中にアドレスバーが伸び縮みして
+  //    画面の高さがその都度変わる。背景の高さを、そのたびに測り直すと、背景が動いて（伸び縮みして）見えてしまう。
+  //    なので、最初に一度だけ画面の高さを測って固定値（px）として使い、以後は測り直さない。
+  useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    setBgHeight(window.innerHeight + 160);
+  }, []);
+
   // 🔥 オフライン保存・削除のあとにも呼んで、写真などの参照先（ネット／端末内）を最新にする
   const loadData = useCallback(async () => {
     try {
@@ -200,16 +209,21 @@ function MinimalHomeInner({ promptLogin = false }) {
 
   return (
     <div className="relative w-full bg-black overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
-      {/* 背景：position: fixed + inset:0 で、常に画面いっぱい・常に同じ位置・常に同じ倍率にする。
-          一覧がどれだけ長くなっても、背景は「一覧の高さに合わせて伸びる」ことがないので、
-          スクロールしても動かず、写真が拡大されて見えることもない（sticky
-          ＋JSで測った高さ、を使っていたときは、一覧が伸びるほど背景の縦長の箱も伸び、
-          object-coverがその箱を覆おうとして写真が大きく拡大されて見えてしまっていた） */}
+      {/* 背景：position: fixed（画面に貼り付ける）＋ 一度だけ測った高さ（px に固定）。
+          ・fixed は、一覧がどれだけ長くても、常に画面のその場所に居続ける（sticky と違い「くっつく範囲」を使い切って
+          　剥がれる、ということが無い）→ 最後までスクロールしても、背景が途切れない
+          ・高さを、アドレスバーの伸縮のたびに測り直さず、最初に一度だけ測った値（画面の高さ＋少し）に固定する
+          　→ SafariやAndroid Chromeで、スクロール中にアドレスバーが伸び縮みしても、背景の大きさが変わらない（動いて見えない）
+          ・録音画面と同じ「画面の高さ＋160px」を使うので、一覧の長さに関わらず、常にひとつの画面ぶんの大きさのまま
+          　（object-coverが引き伸ばされて拡大されて見えることも無い） */}
       <div
-        className={`fixed inset-0 z-0 ${
+        className={`fixed top-0 left-0 w-full z-0 ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
-        style={{ transition: "opacity 2600ms ease-out, filter 2600ms ease-out" }}
+        style={{
+          transition: "opacity 2600ms ease-out, filter 2600ms ease-out",
+          height: bgHeight ? `${bgHeight}px` : "100vh",
+        }}
       >
         <Image
           src="/forest-bg.jpg"
