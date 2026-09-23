@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useCal
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { canGoBackInApp } from "../lib/backNav";
+import { canGoBackInApp, hasNavigatedInApp } from "../lib/backNav";
 import { useSwipeNav } from "../lib/useSwipeNav";
 import { fetchDetections, fetchBirdImages, getRemoteAudioUrl } from "../lib/queries";
 import { forgetSpectrogram } from "../lib/spectrogram3dData";
@@ -64,7 +64,10 @@ function MinimalHomeInner({ promptLogin = false }) {
   const [birdImages, setBirdImages] = useState([]);
   const [keyword, setKeyword] = useState("");
 
-  const [bgRevealed, setBgRevealed] = useState(false);
+  // 🔥 背景の写真を、透明から浮かび上がらせる演出は、アプリを開いた最初の1回だけ。
+  //    2回目以降（録音画面からスワイプで戻ってきたときなど）は、最初から見えている状態にする
+  //    （毎回、写真が透明→浮かび上がる、をやり直すと、その一瞬、下地の黒が見えてしまうため）
+  const [bgRevealed, setBgRevealed] = useState(() => hasNavigatedInApp());
   const [contentRevealed, setContentRevealed] = useState(false);
   const [bgHeight, setBgHeight] = useState(null);
   // 🔥 鳥の窓は、画面の住所（?bird=鳥の名前）と連動させる。開くと履歴が1つ増え、「×」で1つ戻る。
@@ -183,8 +186,11 @@ function MinimalHomeInner({ promptLogin = false }) {
   }, [rawDetections, birdImages]);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setBgRevealed(true), 80);
+    // 文字・検索窓・一覧の、ゆっくりの登場効果は、毎回（2回目以降も）そのまま再生する
     const t2 = setTimeout(() => setContentRevealed(true), 650);
+    // 背景の写真の登場効果（透明→浮かび上がる）だけは、最初の1回に限る（上のuseStateを参照）
+    if (hasNavigatedInApp()) return () => clearTimeout(t2);
+    const t1 = setTimeout(() => setBgRevealed(true), 80);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
