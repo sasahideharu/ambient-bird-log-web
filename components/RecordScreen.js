@@ -16,7 +16,9 @@ import { createLiveAnalysis, warmLiveServer } from "../lib/liveAnalysis";
 import { compactResult, emptyLive, listLive, mergeLive } from "../lib/liveSpecies";
 
 const LIVE_ON_KEY = "abl.recorder.live"; // リアルタイム解析の入・切（この端末だけの設定）
-const WARM_VALID_MS = 4 * 60 * 1000; // サーバーは、最後の呼び出しから5分で眠る。その手前まで、起きているとみなす
+const WARM_VALID_MS = 2.5 * 60 * 1000; // サーバーは、最後の呼び出しから5分で眠る。この時間より前の合図は「まだ起きている」とみなして、送り直さない
+const KEEP_WARM_INTERVAL_MS = 170 * 1000; // まめに起こしておく間隔（5分の眠りより、じゅうぶん短く）
+const KEEP_WARM_IDLE_STOP_MS = 60 * 60 * 1000; // これだけ録音していなければ、まめに起こすのをやめる（フィールドを離れた・放置とみなす）
 
 const card = "mx-4 mt-2.5 mb-3 bg-white border-[3px] border-cardBorder rounded-2xl p-4";
 const chip = "inline-flex items-center gap-1 rounded-full border-2 border-cardBorder bg-page px-2.5 py-1 text-[11px] font-bold";
@@ -50,6 +52,7 @@ export default function RecordScreen() {
   const [loc, setLoc] = useState({ status: "checking" });
   const [online, setOnline] = useState(true);
   const [dim, setDim] = useState(false);
+  const [discarding, setDiscarding] = useState(false); // 「破棄する」の確認を出している
   const [liveOn, setLiveOn] = useState(true);
   const [liveAgg, setLiveAgg] = useState(emptyLive());
   const [liveState, setLiveState] = useState(null);
@@ -60,6 +63,7 @@ export default function RecordScreen() {
   const liveOnRef = useRef(true);
   liveOnRef.current = liveOn;
   const warmedRef = useRef({ key: "", at: 0 }); // 最後に起こした場所と時刻
+  const lastActivityRef = useRef(Date.now()); // 最後に録音した時刻（まめに起こすのを、いつやめるかの目安）
   const locRef = useRef(loc);
   locRef.current = loc;
   const settingsRef = useRef(settings);
@@ -112,6 +116,22 @@ export default function RecordScreen() {
     if (!login.loggedIn || !liveOn || !online || loc.status === "checking") return;
     wakeServer(placeLat != null && placeLon != null ? { latitude: placeLat, longitude: placeLon } : null);
   }, [login.loggedIn, liveOn, online, loc.status, placeLat, placeLon, wakeServer]);
+
+  // フィールドで、次の録音まで、サーバーを起こしたままにしておく：この画面を開いている間、まめに（5分の眠りより短い、約3分おきに）合図を送る。
+  //   ・画面がロックされている間も、送る（iPhone は、録音中であれば、別の録音〔AAC〕が動いているぶん、音の処理が続くので、JS も動く。
+  //     録音していないときは、iPhone の仕組み上、ロック中はこの合図自体も止まることがある＝次に画面を開いたときに、また送られる）
+  //   ・録音中でも、送る（iPhone は、画面を消すと、無圧縮の処理〔と、それに乗るリアルタイム解析〕が止まるため、
+  //     解析の呼び出しだけでは、サーバーが起きたままにならないことがある。画面を開き直したとき、すぐ使えるように）
+  //   ・60分、録音していなければ、やめる（フィールドを離れた・放置とみなす）
+  useEffect(() => {
+    if (!login.loggedIn || !liveOn || !online) return;
+    const tick = () => {
+      if (Date.now() - lastActivityRef.current > KEEP_WARM_IDLE_STOP_MS) return; // 使わなくなったので、そっとしておく
+      wakeServer(placeLat != null && placeLon != null ? { latitude: placeLat, longitude: placeLon } : null);
+    };
+    const timer = setInterval(tick, KEEP_WARM_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [login.loggedIn, liveOn, online, placeLat, placeLon, wakeServer]);
 
   // 場所：位置情報（GPS）を取る。取れなければ、デフォルトの場所。近くに、これまでの場所があれば、その名前を提案する
   const refreshLocation = useCallback(async () => {
@@ -170,6 +190,8 @@ export default function RecordScreen() {
   async function start() {
     setError(null);
     setResult(null);
+    setDiscarding(false);
+    lastActivityRef.current = Date.now();
     setPhase("starting");
     setLiveAgg(emptyLive());
     setLiveState(null);
@@ -193,9 +215,18 @@ export default function RecordScreen() {
         onEnded: (meta) => {
           engine.stop();
           ctrlRef.current = null;
+          lastActivityRef.current = Date.now();
           setDim(false);
           setResult(meta);
           setPhase("done");
+        },
+        onDiscarded: () => {
+          engine.stop();
+          ctrlRef.current = null;
+          lastActivityRef.current = Date.now();
+          setDim(false);
+          setDiscarding(false);
+          setPhase("idle");
         },
       });
       ctrlRef.current = ctrl;
@@ -217,6 +248,10 @@ export default function RecordScreen() {
 
   async function stop() {
     await ctrlRef.current?.stop("停止ボタン");
+  }
+
+  async function discard() {
+    await ctrlRef.current?.discard("破棄ボタン");
   }
 
   // 画面から離れるときに、録音中なら、そこまでを保存して終える
@@ -308,7 +343,7 @@ export default function RecordScreen() {
 
             <button
               onClick={recording ? stop : start}
-              disabled={phase === "starting" || !login.loggedIn}
+              disabled={phase === "starting" || !login.loggedIn || discarding}
               className={`mt-3 w-full rounded-2xl py-4 text-base font-bold text-white disabled:opacity-40 ${recording ? "bg-[#3F6C74]" : "bg-[#D9534F]"}`}
             >
               {phase === "starting" ? "準備中…" : recording ? "■ 停止して保存する" : "● 録音を始める"}
@@ -317,6 +352,25 @@ export default function RecordScreen() {
               <button onClick={() => setDim(true)} className="mt-2 w-full rounded-xl border-2 border-cardBorder bg-white py-2.5 text-[12px] font-bold text-[#3F6C74]">
                 🌙 画面を暗くする（録音は続きます・電池の節約）
               </button>
+            )}
+            {recording && !discarding && (
+              <button onClick={() => setDiscarding(true)} className="mt-2 w-full rounded-xl border-2 border-red-300 bg-white py-2.5 text-[12px] font-bold text-red-500">
+                ❌ 破棄する（保存しない）
+              </button>
+            )}
+            {discarding && (
+              <div className="mt-2 rounded-xl border-[3px] border-red-300 bg-red-50 p-3">
+                <div className="text-xs font-bold text-red-500">この録音を、保存せずに、やめますか？</div>
+                <p className="mt-1 text-[11px] text-ink leading-relaxed">ここまでの音（無圧縮・AAC）が、端末から消えます。元に戻せません。</p>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={discard} className="flex-1 rounded-xl bg-red-500 py-2.5 text-[12px] font-bold text-white">
+                    破棄する
+                  </button>
+                  <button onClick={() => setDiscarding(false)} className="flex-1 rounded-xl border-2 border-cardBorder bg-white py-2.5 text-[12px] font-bold text-[#3F6C74]">
+                    やめる（録音を続ける）
+                  </button>
+                </div>
+              </div>
             )}
             {!recording && <p className="mt-2 text-[10px] text-inkMuted leading-relaxed">録音は、この端末の中に保存されます（電波が無くても録れます）。画面を消しても、別の録音（AAC）は続きます。</p>}
             {recording && <p className="mt-2 text-[10px] text-inkMuted leading-relaxed">この画面を離れると、録音は終わります（そこまでは、保存されます）。アプリを閉じるときは、先に、停止してください。</p>}

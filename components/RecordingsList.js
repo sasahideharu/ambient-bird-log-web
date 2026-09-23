@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { summarizeStoredLive } from "../lib/liveSpecies";
 import Link from "next/link";
 import BackLink from "./BackLink";
 import RecordingPlaceEditor from "./RecordingPlaceEditor";
+import RecordingBirdsPanel from "./RecordingBirdsPanel";
 import { useLoginState } from "../lib/useLoginState";
 import { isNativeApp } from "../lib/offline";
 import { deleteRecording, listRecordings, playableUrl } from "../lib/recordingStore";
@@ -37,14 +39,18 @@ function locationText(l) {
   return `${l.name || "名前なし"}（${src}・${l.latitude.toFixed(3)}, ${l.longitude.toFixed(3)}）`;
 }
 
-function Item({ meta, onDelete, onChanged }) {
+function Item({ meta: metaProp, onDelete, onChanged }) {
+  const [meta, setMeta] = useState(metaProp); // 鳥・場所の編集で、すぐ画面に反映するための、手元の写し
   const [url, setUrl] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [editingPlace, setEditingPlace] = useState(false);
+  const [editingBirds, setEditingBirds] = useState(false);
   const [busy, setBusy] = useState(false);
+  useEffect(() => setMeta(metaProp), [metaProp]);
   const files = meta._files ?? { pcm: (meta.audio?.pcm?.samples ?? 0) * 2, aac: meta.audio?.aac?.bytes ?? 0 };
   const unfinished = meta.status === "recording"; // 録音中に、アプリが止まったもの
   const master = meta.audio?.master;
+  const birdCount = (summarizeStoredLive(meta.live).length || 0) + (meta.eyeWitness?.length ?? 0);
 
   return (
     <div className={card}>
@@ -85,6 +91,11 @@ function Item({ meta, onDelete, onChanged }) {
               📍 場所を変える
             </button>
           )}
+          {!editingBirds && (
+            <button className={smallBtn} onClick={() => setEditingBirds(true)}>
+              🐦 鳥{birdCount > 0 ? `（${birdCount}）` : ""}
+            </button>
+          )}
           {!confirming && (
             <button className={`${smallBtn} !text-red-500`} onClick={() => setConfirming(true)}>
               削除
@@ -92,20 +103,34 @@ function Item({ meta, onDelete, onChanged }) {
           )}
         </div>
       )}
-      {url && !editingPlace && (
-        <button className={`${smallBtn} mt-2 mr-2`} onClick={() => setEditingPlace(true)}>
-          📍 場所を変える
-        </button>
+      {url && !editingPlace && !editingBirds && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button className={smallBtn} onClick={() => setEditingPlace(true)}>
+            📍 場所を変える
+          </button>
+          <button className={smallBtn} onClick={() => setEditingBirds(true)}>
+            🐦 鳥{birdCount > 0 ? `（${birdCount}）` : ""}
+          </button>
+        </div>
       )}
       {editingPlace && (
         <RecordingPlaceEditor
           meta={meta}
           onCancel={() => setEditingPlace(false)}
-          onSaved={() => {
+          onSaved={(next) => {
+            setMeta(next);
             setEditingPlace(false);
             onChanged();
           }}
         />
+      )}
+      {editingBirds && (
+        <>
+          <RecordingBirdsPanel meta={meta} onSaved={setMeta} />
+          <button className={`${smallBtn} mt-2`} onClick={() => setEditingBirds(false)}>
+            閉じる
+          </button>
+        </>
       )}
       {url && !confirming && (
         <button className={`${smallBtn} mt-2 !text-red-500`} onClick={() => setConfirming(true)}>
