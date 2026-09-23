@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { canGoBackInApp, hasNavigatedInApp } from "../lib/backNav";
 import { useSwipeNav } from "../lib/useSwipeNav";
+import { useStickyBgHeight } from "../lib/useStickyBgHeight";
 import { fetchDetections, fetchBirdImages, getRemoteAudioUrl } from "../lib/queries";
 import { forgetSpectrogram } from "../lib/spectrogram3dData";
 import { useLoginState } from "../lib/useLoginState";
@@ -69,7 +70,6 @@ function MinimalHomeInner({ promptLogin = false }) {
   //    （毎回、写真が透明→浮かび上がる、をやり直すと、その一瞬、下地の黒が見えてしまうため）
   const [bgRevealed, setBgRevealed] = useState(() => hasNavigatedInApp());
   const [contentRevealed, setContentRevealed] = useState(false);
-  const [bgHeight, setBgHeight] = useState(null);
   // 🔥 鳥の窓は、画面の住所（?bird=鳥の名前）と連動させる。開くと履歴が1つ増え、「×」で1つ戻る。
   //    こうすると、窓から別の画面（3D の全画面・音声の編集）へ行って戻ったとき、鳥の窓が開いた状態に戻る（トップまで戻らない）
   const selectedSpecies = params.get("bird");
@@ -139,15 +139,6 @@ function MinimalHomeInner({ promptLogin = false }) {
     };
   }, [recomputePadding]);
 
-  // 🔥 InstagramやLINEのアプリ内ブラウザは、スクロール中にアドレスバーが伸び縮みして
-  //    100vh/100lvhの値がその都度変わってしまい、背景がズームして見えてしまう。
-  //    なので、最初に一度だけ画面の高さを測って固定値（px）として使い、以後は測り直さない。
-  //    後からアドレスバーが縮んで表示領域が広がっても隙間ができないよう、余裕を持たせておく。
-  useLayoutEffect(() => {
-    if (typeof window === "undefined") return;
-    setBgHeight(window.innerHeight + 160);
-  }, []);
-
   // 🔥 オフライン保存・削除のあとにも呼んで、写真などの参照先（ネット／端末内）を最新にする
   const loadData = useCallback(async () => {
     try {
@@ -207,6 +198,10 @@ function MinimalHomeInner({ promptLogin = false }) {
     );
     return sortWithFixedTail(keywordFiltered, orderMap);
   }, [rawDetections, birdImages, keyword, orderMap]);
+
+  // 🔥 一覧の件数が変わったとき（データが読み込めた・検索で絞り込んだ、など）だけ、
+  //    背景の高さが足りているかを測り直す（内容が画面より長く伸びても、背景が途中で剥がれないように）
+  const bgHeight = useStickyBgHeight(visible.length);
 
   return (
     <div className="relative w-full bg-black overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
