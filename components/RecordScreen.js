@@ -303,7 +303,7 @@ export default function RecordScreen() {
   const warmText = warm === "warming" ? "☁ 解析サーバーを起こしています…" : warm === "ready" ? "☁ 解析サーバー：準備OK" : warm === "failed" ? "☁ 解析サーバー：つながりません" : null;
 
   return (
-    <div className="relative w-full overflow-x-hidden bg-black" {...swipeHandlers}>
+    <div className="relative w-full overflow-x-hidden bg-black" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
       {/* 背景：トップページと同じ、森の写真（sticky で、アドレスバーの伸縮にも安定して追従する） */}
       <div
         className="sticky top-0 z-0 w-full"

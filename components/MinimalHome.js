@@ -210,7 +210,7 @@ function MinimalHomeInner({ promptLogin = false }) {
   }, [rawDetections, birdImages, keyword, orderMap]);
 
   return (
-    <div className="relative w-full bg-black overflow-x-hidden" {...swipeHandlers}>
+    <div className="relative w-full bg-black overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
       {/* 背景：sticky + 負のマージンで「固定に見える」ようにする。
           position: fixed だとAndroidのChromeでアドレスバーの伸縮時に位置がズレることがあるため、
           スクロールの動きに素直に追従するstickyの方が両OSで安定する */}
