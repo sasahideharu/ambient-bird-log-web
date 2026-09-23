@@ -6,7 +6,6 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { canGoBackInApp, hasNavigatedInApp } from "../lib/backNav";
 import { useSwipeNav } from "../lib/useSwipeNav";
-import { useStickyBgHeight } from "../lib/useStickyBgHeight";
 import { fetchDetections, fetchBirdImages, getRemoteAudioUrl } from "../lib/queries";
 import { forgetSpectrogram } from "../lib/spectrogram3dData";
 import { useLoginState } from "../lib/useLoginState";
@@ -199,24 +198,18 @@ function MinimalHomeInner({ promptLogin = false }) {
     return sortWithFixedTail(keywordFiltered, orderMap);
   }, [rawDetections, birdImages, keyword, orderMap]);
 
-  // 🔥 一覧の件数が変わったとき（データが読み込めた・検索で絞り込んだ、など）だけ、
-  //    背景の高さが足りているかを測り直す（内容が画面より長く伸びても、背景が途中で剥がれないように）
-  const bgHeight = useStickyBgHeight(visible.length);
-
   return (
     <div className="relative w-full bg-black overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
-      {/* 背景：sticky + 負のマージンで「固定に見える」ようにする。
-          position: fixed だとAndroidのChromeでアドレスバーの伸縮時に位置がズレることがあるため、
-          スクロールの動きに素直に追従するstickyの方が両OSで安定する */}
+      {/* 背景：position: fixed + inset:0 で、常に画面いっぱい・常に同じ位置・常に同じ倍率にする。
+          一覧がどれだけ長くなっても、背景は「一覧の高さに合わせて伸びる」ことがないので、
+          スクロールしても動かず、写真が拡大されて見えることもない（sticky
+          ＋JSで測った高さ、を使っていたときは、一覧が伸びるほど背景の縦長の箱も伸び、
+          object-coverがその箱を覆おうとして写真が大きく拡大されて見えてしまっていた） */}
       <div
-        className={`sticky top-0 w-full z-0 ${
+        className={`fixed inset-0 z-0 ${
           bgRevealed ? "opacity-100 brightness-100 saturate-100" : "opacity-0 brightness-[0.35] saturate-[0.55]"
         }`}
-        style={{
-          transition: "opacity 2600ms ease-out, filter 2600ms ease-out",
-          height: bgHeight ? `${bgHeight}px` : "100vh",
-          marginBottom: bgHeight ? `-${bgHeight}px` : "-100vh",
-        }}
+        style={{ transition: "opacity 2600ms ease-out, filter 2600ms ease-out" }}
       >
         <Image
           src="/forest-bg.jpg"
