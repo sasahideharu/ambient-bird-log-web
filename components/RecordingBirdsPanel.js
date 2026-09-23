@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { summarizeStoredLive } from "../lib/liveSpecies";
 import { loadSpeciesChoices, addEyeWitness, removeEyeWitness } from "../lib/recordingBirds";
+import { loadSpeciesJaNames } from "../lib/speciesNames";
 
 const inputClass = "w-full px-3 py-2 rounded-xl border-[3px] border-cardBorder bg-white text-sm text-ink outline-none focus:border-accent";
 const smallBtn = "rounded-full border-2 border-cardBorder bg-page px-3 py-1.5 text-[11px] font-bold text-[#3F6C74] hover:border-accent disabled:opacity-40";
@@ -15,12 +16,18 @@ export default function RecordingBirdsPanel({ meta, onSaved }) {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [jaNames, setJaNames] = useState(null); // 学名→和名（古い録音〔和名を保存していない版〕の、日本語表示のため）
 
   useEffect(() => {
     loadSpeciesChoices().then(setChoices);
+    loadSpeciesJaNames().then(setJaNames);
   }, []);
 
-  const detected = useMemo(() => summarizeStoredLive(meta.live), [meta.live]);
+  const detected = useMemo(() => {
+    const list = summarizeStoredLive(meta.live);
+    if (!jaNames) return list;
+    return list.map((s) => (s.common ? s : { ...s, common: jaNames.get(s.sci) ?? null }));
+  }, [meta.live, jaNames]);
   const witnessed = meta.eyeWitness ?? [];
 
   // 名前で探す：入力した文字を含む名前だけ（和名・学名の両方から）
