@@ -323,31 +323,47 @@ export default function RecordScreen() {
     <div className="relative w-full overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
       <div className="abl-page-safe relative z-10 flex min-h-screen w-full justify-center px-6 pb-10" style={swipeStyle}>
         <div className="w-full max-w-sm">
-          {/* 🔥 たたんだ表示：録音していない・ログイン中・まだ開いていないときだけ（最初は、これが出る） */}
+          {/* 🔥 たたんだ表示：録音していない・ログイン中・まだ開いていないときだけ（最初は、これが出る）。
+              円の位置を、画面の高さに対する割合（top: 58%）で、絶対位置に固定する。
+              文字の量やフォントで位置がずれないよう、円だけは、これで正確に置く（ユーザーの参考画像と同じ位置） */}
           {collapsedIdle && (
-            <div className="flex flex-col items-center pt-12">
-              <div className="w-full text-[11px] leading-relaxed text-white/85">
+            <div className="relative min-h-screen w-full">
+              <div className="absolute left-0 right-0 text-[11px] leading-relaxed text-white/85" style={{ top: "27%" }}>
                 <div className="font-bold">Ambient Bird Log - Analysis</div>
                 <div className="text-white/40">—</div>
                 {statusLines.map((line) => (
                   <div key={line}>{line}</div>
                 ))}
               </div>
-              <button onClick={() => setExpanded(true)} aria-label="詳しい表示を開く" className="mt-10 text-white/70 hover:text-white">
+              <button
+                onClick={() => setExpanded(true)}
+                aria-label="詳しい表示を開く"
+                className="absolute left-1/2 -translate-x-1/2 text-white/70 hover:text-white"
+                style={{ top: "calc(58% - 130px)" }}
+              >
                 <TriangleIcon direction="up" />
               </button>
               <button
                 onClick={start}
                 disabled={phase === "starting"}
                 aria-label="録音を始める"
-                className="relative mt-6 flex h-40 w-40 items-center justify-center rounded-full disabled:opacity-50"
+                className="absolute left-1/2 flex h-40 w-40 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full disabled:opacity-50"
+                style={{ top: "58%" }}
               >
                 <span className="absolute inset-0 rounded-full border border-white/70" />
                 <span className="absolute inset-[10px] rounded-full border border-white/70" />
                 <span className="absolute inset-5 rounded-full bg-white/25" />
               </button>
-              {phase === "starting" && <p className="mt-4 text-[11px] text-white/70">準備中…</p>}
-              {error && <p className="mt-4 text-center text-[11px] leading-relaxed text-[#F0B4AE]">{error}</p>}
+              {phase === "starting" && (
+                <p className="absolute left-1/2 -translate-x-1/2 text-[11px] text-white/70" style={{ top: "calc(58% + 100px)" }}>
+                  準備中…
+                </p>
+              )}
+              {error && (
+                <p className="absolute left-0 right-0 px-4 text-center text-[11px] leading-relaxed text-[#F0B4AE]" style={{ top: "calc(58% + 100px)" }}>
+                  {error}
+                </p>
+              )}
             </div>
           )}
 
