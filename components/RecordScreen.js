@@ -325,9 +325,11 @@ export default function RecordScreen() {
         <div className="w-full max-w-sm">
           {/* 🔥 たたんだ表示：録音していない・ログイン中・まだ開いていないときだけ（最初は、これが出る）。
               円の位置を、画面の高さに対する割合（top: 58%）で、絶対位置に固定する。
-              文字の量やフォントで位置がずれないよう、円だけは、これで正確に置く（ユーザーの参考画像と同じ位置） */}
+              文字の量やフォントで位置がずれないよう、円だけは、これで正確に置く（ユーザーの参考画像と同じ位置）。
+              absolute inset-0 にする（min-h-screen にすると、外側の min-h-screen と足し算されて、
+              画面より少しだけ長くなり、本来は要らない縦スクロールが、わずかにできてしまっていた） */}
           {collapsedIdle && (
-            <div className="relative min-h-screen w-full">
+            <div className="absolute inset-0">
               <div className="absolute left-0 right-0 text-[11px] leading-relaxed text-white/85" style={{ top: "27%" }}>
                 <div className="font-bold">Ambient Bird Log - Analysis</div>
                 <div className="text-white/40">—</div>
