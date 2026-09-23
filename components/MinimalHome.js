@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useCal
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { canGoBackInApp, hasNavigatedInApp } from "../lib/backNav";
+import { canGoBackInApp } from "../lib/backNav";
 import { useSwipeNav } from "../lib/useSwipeNav";
 import { fetchDetections, fetchBirdImages, getRemoteAudioUrl } from "../lib/queries";
 import { forgetSpectrogram } from "../lib/spectrogram3dData";
@@ -67,12 +67,6 @@ function MinimalHomeInner({ promptLogin = false }) {
   const [bgRevealed, setBgRevealed] = useState(false);
   const [contentRevealed, setContentRevealed] = useState(false);
   const [bgHeight, setBgHeight] = useState(null);
-  // 🔥 派手な入場演出（タイトル→検索→一覧の順に、ゆっくり浮かび上がる）は、アプリを開いた、その最初の1回だけ。
-  //    録音画面からスワイプで戻ってきたときなど、2回目以降は、さっと出す（毎回、何秒も待たせないように）
-  const [firstOpen] = useState(() => !hasNavigatedInApp());
-  const timing = firstOpen
-    ? { bg: 80, content: 650, title: 300, subtitle: 900, search: 2400, grid: 5200 }
-    : { bg: 0, content: 120, title: 0, subtitle: 60, search: 140, grid: 220 };
   // 🔥 鳥の窓は、画面の住所（?bird=鳥の名前）と連動させる。開くと履歴が1つ増え、「×」で1つ戻る。
   //    こうすると、窓から別の画面（3D の全画面・音声の編集）へ行って戻ったとき、鳥の窓が開いた状態に戻る（トップまで戻らない）
   const selectedSpecies = params.get("bird");
@@ -189,13 +183,12 @@ function MinimalHomeInner({ promptLogin = false }) {
   }, [rawDetections, birdImages]);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setBgRevealed(true), timing.bg);
-    const t2 = setTimeout(() => setContentRevealed(true), timing.content);
+    const t1 = setTimeout(() => setBgRevealed(true), 80);
+    const t2 = setTimeout(() => setContentRevealed(true), 650);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const visible = useMemo(() => {
@@ -244,14 +237,14 @@ function MinimalHomeInner({ promptLogin = false }) {
           <h1
             ref={titleRef}
             className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero font-light text-white text-3xl tracking-wide text-center`}
-            style={{ transitionDelay: `${timing.title}ms`, transitionDuration: firstOpen ? undefined : "500ms" }}
+            style={{ transitionDelay: "300ms" }}
           >
             Ambient Bird Log
           </h1>
         </div>
         <p
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} font-hero text-[#F4F2EC] text-center mt-2`}
-          style={{ transitionDelay: `${timing.subtitle}ms`, transitionDuration: firstOpen ? undefined : "500ms" }}
+          style={{ transitionDelay: "900ms" }}
         >
           <span className="block text-[10px] tracking-[2px]">by Hideharu Sasa</span>
           <span className="block text-[7px] tracking-[1.5px] mt-1 opacity-80">from Angle Matters</span>
@@ -259,7 +252,7 @@ function MinimalHomeInner({ promptLogin = false }) {
 
         <div
           className={`abl-fade-blur ${contentRevealed ? "abl-fade-in" : ""} w-full mt-10`}
-          style={{ transitionDelay: `${timing.search}ms`, transitionDuration: firstOpen ? "2000ms" : "500ms" }}
+          style={{ transitionDelay: "2400ms", transitionDuration: "2000ms" }}
         >
           <input
             type="text"
@@ -272,7 +265,7 @@ function MinimalHomeInner({ promptLogin = false }) {
 
         <div
           className={`abl-fade ${contentRevealed ? "abl-fade-in" : ""} w-full mt-6 grid grid-cols-3 gap-2`}
-          style={{ transitionDelay: `${timing.grid}ms`, transitionDuration: firstOpen ? "2000ms" : "500ms" }}
+          style={{ transitionDelay: "5200ms", transitionDuration: "2000ms" }}
         >
           {visible.map((s) => (
             <MinimalThumb key={s.name} species={s} onSelect={openBird} />
