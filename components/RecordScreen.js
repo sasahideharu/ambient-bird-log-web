@@ -32,6 +32,16 @@ const mmss = (sec) => {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 };
 
+// たたんだ表示 ⇄ 詳しい表示の、開閉の三角
+function TriangleIcon({ direction }) {
+  const points = direction === "up" ? "14,2 26,18 2,18" : "2,2 26,2 14,18";
+  return (
+    <svg width="28" height="20" viewBox="0 0 28 20" aria-hidden="true">
+      <polygon points={points} fill="currentColor" opacity="0.7" />
+    </svg>
+  );
+}
+
 // 場所の状態 → 録音の情報に入れる形
 function toMetaLocation(loc) {
   if (!loc || loc.status === "checking" || loc.latitude == null) {
@@ -64,6 +74,7 @@ export default function RecordScreen() {
   const [liveAgg, setLiveAgg] = useState(emptyLive());
   const [liveState, setLiveState] = useState(null);
   const [warm, setWarm] = useState("idle"); // idle | warming | ready | failed（解析サーバーを起こした結果）
+  const [expanded, setExpanded] = useState(false); // たたんだ表示（false）⇄ 今までの詳しい表示（true）。録音していないときだけ使う
   const canvasRef = useRef(null);
   const ctrlRef = useRef(null);
   const engineRef = useRef(null);
@@ -239,6 +250,7 @@ export default function RecordScreen() {
           setDim(false);
           setResult(meta);
           setPhase("done");
+          setExpanded(true); // 録音が終わったら、結果と一緒に、詳しい表示に戻す
         },
         onDiscarded: () => {
           engine.stop();
@@ -294,17 +306,81 @@ export default function RecordScreen() {
   const showLive = recording || liveAgg.windows > 0;
   const warmText = warm === "warming" ? "☁ 解析サーバーを起こしています…" : warm === "ready" ? "☁ 解析サーバー：準備OK" : warm === "failed" ? "☁ 解析サーバー：つながりません" : null;
 
+  // 🔥 たたんだ表示・録音中の表示で使う、英語の短いステータス（機器の読み取りふうの見た目）
+  const gpsOk = loc.status === "gps" || loc.status === "default";
+  const gpsDetail = loc.status === "gps" ? `~${Math.round(loc.accuracyM ?? 0)}m` : loc.status === "default" ? "default" : loc.status === "checking" ? "…" : "none";
+  const analysisText = warm === "ready" ? "OK" : warm === "warming" ? "…" : warm === "failed" ? "NG" : "—";
+  const statusLines = [
+    `${gpsOk ? "OK" : "…"} | GPS / ${gpsDetail}`,
+    `${online ? "OK" : "NG"} | Mobile NetWork`,
+    `${liveOn ? "ON" : "OFF"} | Live Analysis`,
+    `${liveOn ? analysisText : "OFF"} | Analysis Server Connection`,
+  ];
+
+  const collapsedIdle = !recording && !expanded && login.loggedIn;
+
   return (
     <div className="relative w-full overflow-x-hidden" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
       <div className="abl-page-safe relative z-10 flex min-h-screen w-full justify-center px-6 pb-10" style={swipeStyle}>
         <div className="w-full max-w-sm">
-          <div className="flex items-center justify-between px-1">
-            <BackLink fallbackHref="/" className="text-xs font-bold text-white/80 hover:text-white">
-              ‹ 戻る
-            </BackLink>
-            <span className="text-[9px] tracking-wide text-white/35">◀ スワイプでトップへ</span>
-          </div>
+          {/* 🔥 たたんだ表示：録音していない・ログイン中・まだ開いていないときだけ（最初は、これが出る） */}
+          {collapsedIdle && (
+            <div className="flex flex-col items-center pt-12">
+              <div className="w-full text-[11px] leading-relaxed text-white/85">
+                <div className="font-bold">Ambient Bird Log - Analysis</div>
+                <div className="text-white/40">—</div>
+                {statusLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </div>
+              <button onClick={() => setExpanded(true)} aria-label="詳しい表示を開く" className="mt-10 text-white/70 hover:text-white">
+                <TriangleIcon direction="up" />
+              </button>
+              <button
+                onClick={start}
+                disabled={phase === "starting"}
+                aria-label="録音を始める"
+                className="relative mt-6 flex h-40 w-40 items-center justify-center rounded-full disabled:opacity-50"
+              >
+                <span className="absolute inset-0 rounded-full border border-white/70" />
+                <span className="absolute inset-[10px] rounded-full border border-white/70" />
+                <span className="absolute inset-5 rounded-full bg-white/25" />
+              </button>
+              {phase === "starting" && <p className="mt-4 text-[11px] text-white/70">準備中…</p>}
+              {error && <p className="mt-4 text-center text-[11px] leading-relaxed text-[#F0B4AE]">{error}</p>}
+            </div>
+          )}
 
+          {!collapsedIdle && (
+            <div className="flex items-center justify-between px-1">
+              <BackLink fallbackHref="/" className="text-xs font-bold text-white/80 hover:text-white">
+                ‹ 戻る
+              </BackLink>
+              <span className="text-[9px] tracking-wide text-white/35">◀ スワイプでトップへ</span>
+            </div>
+          )}
+
+          {/* 🔥 録音中：英語のステータス＋透過のスペクトログラム（背景の写真の上に、直接） */}
+          {recording && (
+            <>
+              <div className="mt-2 px-1 text-[11px] leading-relaxed text-white/85">
+                <div className="font-bold">Ambient Bird Log - Analysis</div>
+                <div className="text-white/40">—</div>
+                {statusLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </div>
+              <canvas ref={canvasRef} width={640} height={280} className="mt-3 block w-full" />
+            </>
+          )}
+
+          {!recording && expanded && login.loggedIn && (
+            <button onClick={() => setExpanded(false)} aria-label="たたんだ表示に戻る" className="mx-auto mt-1 block text-white/70 hover:text-white">
+              <TriangleIcon direction="down" />
+            </button>
+          )}
+
+          {!recording && (expanded || !login.loggedIn) && (
           <div className={card}>
             <div className="flex items-center justify-between">
               <div className="font-display text-xl text-white">録音</div>
@@ -338,6 +414,7 @@ export default function RecordScreen() {
             ) : null}
             {login.loggedIn && !native && <p className="mt-2 text-[10px] leading-relaxed text-[#FFD27A]">ブラウザでは、録音は保存されません（試験用。ページを閉じると消えます）。アプリで使ってください。</p>}
           </div>
+          )}
 
           {settingsOpen && !recording && (
             <div className={card}>
@@ -346,43 +423,48 @@ export default function RecordScreen() {
             </div>
           )}
 
-          {login.loggedIn && (
+          {!recording && expanded && login.loggedIn && (
             <div className={card}>
               <div className="relative overflow-hidden rounded-lg bg-black">
                 <canvas ref={canvasRef} width={640} height={280} className="block w-full" />
-                {!recording && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-white/50">録音を始めると、ここに、音が流れます</div>}
+                <div className="absolute inset-0 flex items-center justify-center text-[11px] text-white/50">録音を始めると、ここに、音が流れます</div>
               </div>
-              {recording && (
-                <>
-                  <div className="mt-2 flex items-center justify-between text-[11px] tabular-nums text-white">
-                    <span className="font-bold text-[#FF8C86]">● 録音中 {mmss(elapsed)}</span>
-                    <span className="text-white/55">最長 {mmss(MAX_RECORDING_SEC)}</span>
-                  </div>
-                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
-                    <div className="h-full bg-[#8FC2CB] transition-[width] duration-100" style={{ width: `${Math.max(0, Math.min(100, ((level.rmsDb + 90) / 70) * 100))}%` }} />
-                  </div>
-                  <div className="mt-1 text-[10px] tabular-nums text-white/55">音の大きさ：{level.rmsDb.toFixed(0)} dBFS</div>
-                  {interrupted && <p className="mt-2 rounded-lg bg-[#FFD27A]/15 p-2 text-[10px] leading-relaxed text-[#FFD27A]">画面が消えているため、無圧縮の録音が止まっています。別の録音（AAC）は続いています。</p>}
-                  {live && !live.aacOk && <p className="mt-2 rounded-lg bg-[#F0B4AE]/15 p-2 text-[10px] leading-relaxed text-[#F0B4AE]">別の録音（AAC）が動いていません。画面を消すと、途切れることがあります。</p>}
-                  {live?.writeError && <p className="mt-2 rounded-lg bg-[#F0B4AE]/15 p-2 text-[10px] leading-relaxed text-[#F0B4AE]">端末に書き込めていません。容量を確認してください。</p>}
-                </>
-              )}
+              {showLive && <LiveBirds list={liveList} state={liveState} enabled={liveOn} finished={!recording} />}
+              {error && <p className="mt-2 text-[11px] leading-relaxed text-[#F0B4AE]">{error}</p>}
+              <button
+                onClick={start}
+                disabled={phase === "starting" || !login.loggedIn}
+                className="mt-3 w-full rounded-2xl bg-[#D9534F] py-4 text-base font-bold text-white disabled:opacity-40"
+              >
+                {phase === "starting" ? "準備中…" : "● 録音を始める"}
+              </button>
+              <p className="mt-2 text-[10px] leading-relaxed text-white/55">録音は、この端末の中に保存されます（電波が無くても録れます）。画面を消しても、別の録音（AAC）は続きます。</p>
+            </div>
+          )}
+
+          {recording && (
+            <div className={card}>
+              <div className="flex items-center justify-between text-[11px] tabular-nums text-white">
+                <span className="font-bold text-[#FF8C86]">● 録音中 {mmss(elapsed)}</span>
+                <span className="text-white/55">最長 {mmss(MAX_RECORDING_SEC)}</span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
+                <div className="h-full bg-[#8FC2CB] transition-[width] duration-100" style={{ width: `${Math.max(0, Math.min(100, ((level.rmsDb + 90) / 70) * 100))}%` }} />
+              </div>
+              <div className="mt-1 text-[10px] tabular-nums text-white/55">音の大きさ：{level.rmsDb.toFixed(0)} dBFS</div>
+              {interrupted && <p className="mt-2 rounded-lg bg-[#FFD27A]/15 p-2 text-[10px] leading-relaxed text-[#FFD27A]">画面が消えているため、無圧縮の録音が止まっています。別の録音（AAC）は続いています。</p>}
+              {live && !live.aacOk && <p className="mt-2 rounded-lg bg-[#F0B4AE]/15 p-2 text-[10px] leading-relaxed text-[#F0B4AE]">別の録音（AAC）が動いていません。画面を消すと、途切れることがあります。</p>}
+              {live?.writeError && <p className="mt-2 rounded-lg bg-[#F0B4AE]/15 p-2 text-[10px] leading-relaxed text-[#F0B4AE]">端末に書き込めていません。容量を確認してください。</p>}
               {showLive && <LiveBirds list={liveList} state={liveState} enabled={liveOn} finished={!recording} />}
               {error && <p className="mt-2 text-[11px] leading-relaxed text-[#F0B4AE]">{error}</p>}
 
-              <button
-                onClick={recording ? stop : start}
-                disabled={phase === "starting" || !login.loggedIn || discarding}
-                className={`mt-3 w-full rounded-2xl py-4 text-base font-bold text-white disabled:opacity-40 ${recording ? "bg-[#3F6C74]" : "bg-[#D9534F]"}`}
-              >
-                {phase === "starting" ? "準備中…" : recording ? "■ 停止して保存する" : "● 録音を始める"}
+              <button onClick={stop} disabled={discarding} className="mt-3 w-full rounded-2xl bg-[#3F6C74] py-4 text-base font-bold text-white disabled:opacity-40">
+                ■ 停止して保存する
               </button>
-              {recording && (
-                <button onClick={() => setDim(true)} className={`mt-2 w-full ${ghostBtn}`}>
-                  🌙 画面を暗くする（録音は続きます・電池の節約）
-                </button>
-              )}
-              {recording && !discarding && (
+              <button onClick={() => setDim(true)} className={`mt-2 w-full ${ghostBtn}`}>
+                🌙 画面を暗くする（録音は続きます・電池の節約）
+              </button>
+              {!discarding && (
                 <button onClick={() => setDiscarding(true)} className="mt-2 w-full rounded-xl border border-[#F0B4AE]/50 bg-[#F0B4AE]/10 py-2.5 text-[12px] font-bold text-[#F0B4AE] hover:border-[#F0B4AE]">
                   ❌ 破棄する（保存しない）
                 </button>
@@ -401,8 +483,7 @@ export default function RecordScreen() {
                   </div>
                 </div>
               )}
-              {!recording && <p className="mt-2 text-[10px] leading-relaxed text-white/55">録音は、この端末の中に保存されます（電波が無くても録れます）。画面を消しても、別の録音（AAC）は続きます。</p>}
-              {recording && <p className="mt-2 text-[10px] leading-relaxed text-white/55">この画面を離れると、録音は終わります（そこまでは、保存されます）。アプリを閉じるときは、先に、停止してください。</p>}
+              <p className="mt-2 text-[10px] leading-relaxed text-white/55">この画面を離れると、録音は終わります（そこまでは、保存されます）。アプリを閉じるときは、先に、停止してください。</p>
             </div>
           )}
 
